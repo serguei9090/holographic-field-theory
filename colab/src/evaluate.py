@@ -105,21 +105,21 @@ def plot_and_save_results(
     ax1.grid(True, alpha=0.3)
     ax1.set_xticks(list(epochs_ax))
 
-    # ── Panel 2: Comparativa Accuracy ──
+    # ── Panel 2: Comparativa Accuracy (3 barras) ──
     ax2 = fig.add_subplot(gs[1, 0])
     bars = ax2.bar(
-        ["Baseline\n(freq)", "CHFT v2\n(nuestro)"],
-        [base_acc, accuracy],
-        color=["#94A3B8", "#7C3AED"],
+        ["Baseline\n(freq)", "CHFT v2\n(nuestro)", "LLM\n(Transformer)"],
+        [base_acc, accuracy, 35.0],
+        color=["#94A3B8", "#7C3AED", "#10B981"],
         width=0.5,
         edgecolor="white"
     )
-    for bar, val in zip(bars, [base_acc, accuracy]):
+    for bar, val in zip(bars, [base_acc, accuracy, 35.0]):
         ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.2,
                  f"{val:.1f}%", ha='center', va='bottom', fontweight='bold')
-    ax2.set_title("Accuracy@1: CHFT vs Baseline")
+    ax2.set_title("Accuracy@1: Comparativa de Modelos")
     ax2.set_ylabel("Accuracy (%)")
-    ax2.set_ylim(0, max(accuracy, base_acc) * 1.3)
+    ax2.set_ylim(0, max(accuracy, base_acc, 35.0) * 1.3)
     ax2.grid(True, axis='y', alpha=0.3)
 
     # ── Panel 3: Métricas resumen ──
@@ -136,7 +136,9 @@ def plot_and_save_results(
         ["Train Loss final",    f"{loss_history[-1]:.4f}"],
         ["Val Loss final",      f"{val_loss_history[-1]:.4f}"],
         ["Accuracy@1",          f"{accuracy:.2f}%"],
+        ["Target LLM Acc",      "35.00%"],
         ["Perplexity",          f"{perplexity:.1f}"],
+        ["Target LLM PPL",      "8.0"],
         ["Diversity Score",     f"{unique_ratio:.1f}%"],
     ]
     table = ax3.table(
@@ -152,3 +154,23 @@ def plot_and_save_results(
 
     plt.show()
     print("✅ Figura mostrada en pantalla.")
+    
+    # Imprimir un resumen en texto fácil de copiar y pegar
+    print("\n" + "="*50)
+    print("📊 RESUMEN DE MÉTRICAS (CHFT v2 Benchmark)")
+    print("="*50)
+    print(f"Dimensión FHRR     : {dimension:,}")
+    print(f"Vocabulario        : {vocab_size:,} tokens")
+    print(f"Historias Usadas   : {num_stories:,}")
+    print(f"Muestras de Train  : {num_train:,}")
+    print(f"Épocas             : {epochs}")
+    print(f"Tiempo Total       : {elapsed:.1f}s ({elapsed/60:.1f} min)")
+    print(f"Train Loss Final   : {loss_history[-1]:.4f}")
+    print(f"Val Loss Final     : {val_loss_history[-1]:.4f}")
+    print(f"Accuracy@1 (CHFT)  : {accuracy:.2f}%")
+    print(f"Accuracy@1 (Base)  : {base_acc:.2f}%")
+    print(f"Accuracy@1 (LLM)   : 35.00% (Brecha con LLM: -{35.0 - accuracy:.2f}pp)")
+    print(f"Perplexity (CHFT)  : {perplexity:.2f}")
+    print(f"Perplexity (LLM)   : 8.00 (Brecha con LLM: +{perplexity - 8.0:.2f})")
+    print(f"Diversity Score    : {unique_ratio:.1f}%")
+    print("="*50 + "\n")
