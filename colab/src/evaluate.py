@@ -23,33 +23,34 @@ def evaluate_model(
     num_val = len(val_ctx)
 
     with torch.no_grad():
-        keys_r = torch.cos(codebook.phases)
-        keys_i = torch.sin(codebook.phases)
-        # Precomputar rotación posicional para evaluación con decay
-        context_len = val_ctx.shape[1]
-        D_eval = codebook.phases.shape[1]
-        g_eval = torch.Generator(device=val_ctx.device).manual_seed(42)
-        omega_eval = torch.empty(D_eval, device=val_ctx.device).uniform_(-math.pi, math.pi, generator=g_eval)
+        keys_all = codebook.all_keys()
+        D = codebook.phases.shape[1]
+        keys_r = keys_all.real
+        keys_i = keys_all.imag
         
-        pos_angles = torch.arange(context_len, device=val_ctx.device).unsqueeze(1) * omega_eval.unsqueeze(0)
-        pos_rotation = torch.complex(torch.cos(pos_angles), torch.sin(pos_angles)) # [C, D]
-        
-        decay_eval = (0.85 ** torch.arange(context_len, device=val_ctx.device).flip(0)).unsqueeze(1)
-        pos_rotation = pos_rotation * decay_eval
-
         for b in range(math.ceil(num_val / batch_size)):
             ctx_v = val_ctx[b * batch_size : (b + 1) * batch_size]
             tgt_v = val_tgt[b * batch_size : (b + 1) * batch_size]
 
-            ctx_hv = codebook(ctx_v) * pos_rotation
+            ctx_hv = codebook(ctx_v)
             psi_v = torch.sum(ctx_hv, dim=1)
             
             norm_v = torch.clamp(torch.norm(psi_v, p=2, dim=1, keepdim=True), min=1e-12)
-            psi_vr = psi_v.real / norm_v
-            psi_vi = psi_v.imag / norm_v
+            psi_v = psi_v / norm_v
             
-            # Dividir por sqrt(D) para normalizar similitud
-            logits_v = (torch.matmul(psi_vr, keys_r.t()) + torch.matmul(psi_vi, keys_i.t())) / math.sqrt(codebook.phases.shape[1])
+            # Refinamiento multi-hop en evaluación
+            for _ in range(1):
+                sim_ref = torch.real(torch.matmul(psi_v, torch.conj(keys_all).t())) / math.sqrt(D)
+                weights_ref = torch.softmax(sim_ref * 16.0, dim=-1)
+                retrieved = torch.matmul(weights_ref.to(keys_all.dtype), keys_all)
+                psi_v = psi_v + retrieved
+                norm_v = torch.clamp(torch.norm(psi_v, p=2, dim=1, keepdim=True), min=1e-12)
+                psi_v = psi_v / norm_v
+                
+            psi_vr = psi_v.real
+            psi_vi = psi_v.imag
+            
+            logits_v = (torch.matmul(psi_vr, keys_r.t()) + torch.matmul(psi_vi, keys_i.t())) / math.sqrt(D)
 
             preds = torch.argmax(logits_v, dim=1)
             correct += (preds == tgt_v).sum().item()

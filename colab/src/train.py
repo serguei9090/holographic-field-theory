@@ -84,20 +84,7 @@ def run_training_loop(
     
     num_train = len(train_ctx)
     num_val = len(val_ctx)
-
-    context_len = train_ctx.shape[1]
     D = codebook.phases.shape[1]
-    
-    # Generador determinista para frecuencias de fase aleatorias (True Positional Binding)
-    g = torch.Generator(device=device).manual_seed(42)
-    omega = torch.empty(D, device=device).uniform_(-math.pi, math.pi, generator=g)
-    
-    pos_angles = torch.arange(context_len, device=device).unsqueeze(1) * omega.unsqueeze(0)
-    pos_rotation = torch.complex(torch.cos(pos_angles), torch.sin(pos_angles)) # [C, D]
-    
-    # Aplicar decaimiento temporal exponencial (decay rate = 0.85)
-    decay = (0.85 ** torch.arange(context_len, device=device).flip(0)).unsqueeze(1)
-    pos_rotation = pos_rotation * decay
 
     for epoch in range(epochs):
         # ── TRAIN ──
@@ -111,20 +98,30 @@ def run_training_loop(
             ctx_b = train_ctx[idx]
             tgt_b = train_tgt[idx]
 
-            # Superposición holográfica posicional: ψ = Σ (e^{iθ_t} * pos_rot)
-            ctx_hv = codebook(ctx_b) * pos_rotation            # [B, C, D] complejo posicional
+            # Superposición holográfica posicional (Binding interno + Learned weights)
+            ctx_hv = codebook(ctx_b)                          # [B, C, D] complejo posicional
             psi = torch.sum(ctx_hv, dim=1)                 # [B, D] complejo
             
             # Normalización compleja eficiente usando norma L2
             norm = torch.clamp(torch.norm(psi, p=2, dim=1, keepdim=True), min=1e-12)
-            psi_r = psi.real / norm
-            psi_i = psi.imag / norm
+            psi = psi / norm
 
-            # Similitud acelerada en aritmética real: real(A * conj(B)) = A_r*B_r + A_i*B_i
-            keys_r = torch.cos(codebook.phases)
-            keys_i = torch.sin(codebook.phases)
-            # Dividir por sqrt(D) para normalizar similitud
-            logits = (torch.matmul(psi_r, keys_r.t()) + torch.matmul(psi_i, keys_i.t())) / math.sqrt(codebook.phases.shape[1])
+            # Multi-Hop Refinement diferenciable en entrenamiento (1 paso de refinación)
+            keys_all = codebook.all_keys()
+            for _ in range(1):
+                sim_ref = torch.real(torch.matmul(psi, torch.conj(keys_all).t())) / math.sqrt(D)
+                weights_ref = torch.softmax(sim_ref * 16.0, dim=-1)
+                retrieved = torch.matmul(weights_ref.to(keys_all.dtype), keys_all)
+                psi = psi + retrieved
+                norm = torch.clamp(torch.norm(psi, p=2, dim=1, keepdim=True), min=1e-12)
+                psi = psi / norm
+
+            # Proyección final para obtener logits
+            psi_r = psi.real
+            psi_i = psi.imag
+            keys_r = keys_all.real
+            keys_i = keys_all.imag
+            logits = (torch.matmul(psi_r, keys_r.t()) + torch.matmul(psi_i, keys_i.t())) / math.sqrt(D)
 
             loss = nn.functional.cross_entropy(logits * 16.0, tgt_b)
             optimizer.zero_grad()
@@ -146,32 +143,33 @@ def run_training_loop(
         with torch.no_grad():
             val_batches = math.ceil(num_val / batch_size)
             val_loss_sum = 0.0
-            keys_r = torch.cos(codebook.phases)
-            keys_i = torch.sin(codebook.phases)
-            # Precomputar rotación posicional para validación con decay
-            context_len_val = val_ctx.shape[1]
-            D_val = codebook.phases.shape[1]
-            g_val = torch.Generator(device=device).manual_seed(42)
-            omega_val = torch.empty(D_val, device=device).uniform_(-math.pi, math.pi, generator=g_val)
+            keys_all = codebook.all_keys()
             
-            pos_angles_val = torch.arange(context_len_val, device=device).unsqueeze(1) * omega_val.unsqueeze(0)
-            pos_rotation_val = torch.complex(torch.cos(pos_angles_val), torch.sin(pos_angles_val)) # [C, D]
-            
-            decay_val = (0.85 ** torch.arange(context_len_val, device=device).flip(0)).unsqueeze(1)
-            pos_rotation_val = pos_rotation_val * decay_val
-
+            keys_r = keys_all.real
+            keys_i = keys_all.imag
             for b in range(val_batches):
                 ctx_v = val_ctx[b * batch_size : (b + 1) * batch_size]
                 tgt_v = val_tgt[b * batch_size : (b + 1) * batch_size]
-                ctx_hv = codebook(ctx_v) * pos_rotation_val
+                
+                ctx_hv = codebook(ctx_v)
                 psi_v = torch.sum(ctx_hv, dim=1)
                 
                 norm_v = torch.clamp(torch.norm(psi_v, p=2, dim=1, keepdim=True), min=1e-12)
-                psi_vr = psi_v.real / norm_v
-                psi_vi = psi_v.imag / norm_v
+                psi_v = psi_v / norm_v
                 
-                # Dividir por sqrt(D) para normalizar similitud
-                logits_v = (torch.matmul(psi_vr, keys_r.t()) + torch.matmul(psi_vi, keys_i.t())) / math.sqrt(codebook.phases.shape[1])
+                # Refinamiento en validación
+                for _ in range(1):
+                    sim_ref = torch.real(torch.matmul(psi_v, torch.conj(keys_all).t())) / math.sqrt(D)
+                    weights_ref = torch.softmax(sim_ref * 16.0, dim=-1)
+                    retrieved = torch.matmul(weights_ref.to(keys_all.dtype), keys_all)
+                    psi_v = psi_v + retrieved
+                    norm_v = torch.clamp(torch.norm(psi_v, p=2, dim=1, keepdim=True), min=1e-12)
+                    psi_v = psi_v / norm_v
+                
+                psi_vr = psi_v.real
+                psi_vi = psi_v.imag
+                
+                logits_v = (torch.matmul(psi_vr, keys_r.t()) + torch.matmul(psi_vi, keys_i.t())) / math.sqrt(D)
                 val_loss_sum += nn.functional.cross_entropy(logits_v * 16.0, tgt_v).item()
 
         avg_train = epoch_loss / num_batches
