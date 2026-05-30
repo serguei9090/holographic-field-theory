@@ -86,8 +86,18 @@ def run_training_loop(
     num_val = len(val_ctx)
 
     context_len = train_ctx.shape[1]
-    pos_angles = torch.arange(context_len, device=device).unsqueeze(1) * (math.pi / context_len)
+    D = codebook.phases.shape[1]
+    
+    # Generador determinista para frecuencias de fase aleatorias (True Positional Binding)
+    g = torch.Generator(device=device).manual_seed(42)
+    omega = torch.empty(D, device=device).uniform_(-math.pi, math.pi, generator=g)
+    
+    pos_angles = torch.arange(context_len, device=device).unsqueeze(1) * omega.unsqueeze(0)
     pos_rotation = torch.complex(torch.cos(pos_angles), torch.sin(pos_angles)) # [C, D]
+    
+    # Aplicar decaimiento temporal exponencial (decay rate = 0.85)
+    decay = (0.85 ** torch.arange(context_len, device=device).flip(0)).unsqueeze(1)
+    pos_rotation = pos_rotation * decay
 
     for epoch in range(epochs):
         # ── TRAIN ──
@@ -138,10 +148,17 @@ def run_training_loop(
             val_loss_sum = 0.0
             keys_r = torch.cos(codebook.phases)
             keys_i = torch.sin(codebook.phases)
-            # Precomputar rotación posicional para validación
+            # Precomputar rotación posicional para validación con decay
             context_len_val = val_ctx.shape[1]
-            pos_angles_val = torch.arange(context_len_val, device=device).unsqueeze(1) * (math.pi / context_len_val)
+            D_val = codebook.phases.shape[1]
+            g_val = torch.Generator(device=device).manual_seed(42)
+            omega_val = torch.empty(D_val, device=device).uniform_(-math.pi, math.pi, generator=g_val)
+            
+            pos_angles_val = torch.arange(context_len_val, device=device).unsqueeze(1) * omega_val.unsqueeze(0)
             pos_rotation_val = torch.complex(torch.cos(pos_angles_val), torch.sin(pos_angles_val)) # [C, D]
+            
+            decay_val = (0.85 ** torch.arange(context_len_val, device=device).flip(0)).unsqueeze(1)
+            pos_rotation_val = pos_rotation_val * decay_val
 
             for b in range(val_batches):
                 ctx_v = val_ctx[b * batch_size : (b + 1) * batch_size]

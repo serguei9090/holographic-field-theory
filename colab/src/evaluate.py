@@ -25,10 +25,17 @@ def evaluate_model(
     with torch.no_grad():
         keys_r = torch.cos(codebook.phases)
         keys_i = torch.sin(codebook.phases)
-        # Precomputar rotación posicional para evaluación
+        # Precomputar rotación posicional para evaluación con decay
         context_len = val_ctx.shape[1]
-        pos_angles = torch.arange(context_len, device=val_ctx.device).unsqueeze(1) * (math.pi / context_len)
+        D_eval = codebook.phases.shape[1]
+        g_eval = torch.Generator(device=val_ctx.device).manual_seed(42)
+        omega_eval = torch.empty(D_eval, device=val_ctx.device).uniform_(-math.pi, math.pi, generator=g_eval)
+        
+        pos_angles = torch.arange(context_len, device=val_ctx.device).unsqueeze(1) * omega_eval.unsqueeze(0)
         pos_rotation = torch.complex(torch.cos(pos_angles), torch.sin(pos_angles)) # [C, D]
+        
+        decay_eval = (0.85 ** torch.arange(context_len, device=val_ctx.device).flip(0)).unsqueeze(1)
+        pos_rotation = pos_rotation * decay_eval
 
         for b in range(math.ceil(num_val / batch_size)):
             ctx_v = val_ctx[b * batch_size : (b + 1) * batch_size]

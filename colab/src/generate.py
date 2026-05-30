@@ -28,9 +28,16 @@ def generate_text_topk(
     gen_idx = [token_to_idx[t] for t in valid_tok]
 
     with torch.no_grad():
-        # Precomputar rotación posicional para generación
-        pos_angles = torch.arange(context_len, device=device).unsqueeze(1) * (math.pi / context_len)
+        # Precomputar rotación posicional para generación con decay
+        D_gen = codebook.phases.shape[1]
+        g_gen = torch.Generator(device=device).manual_seed(42)
+        omega_gen = torch.empty(D_gen, device=device).uniform_(-math.pi, math.pi, generator=g_gen)
+        
+        pos_angles = torch.arange(context_len, device=device).unsqueeze(1) * omega_gen.unsqueeze(0)
         pos_rotation = torch.complex(torch.cos(pos_angles), torch.sin(pos_angles)) # [C, D]
+        
+        decay_gen = (0.85 ** torch.arange(context_len, device=device).flip(0)).unsqueeze(1)
+        pos_rotation = pos_rotation * decay_gen
 
         for _ in range(max_new):
             ctx = gen_idx[-context_len:]
