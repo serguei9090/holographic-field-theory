@@ -40,9 +40,10 @@ class ModernHopfieldMemory:
         """Retorna (índice_más_probable, similitudes_raw)"""
         if self.keys is None:
             raise ValueError("Keys not initialized. Call update_keys() first.")
+        # Dividir por sqrt(D) para normalizar similitud
         sim = torch.real(
             torch.matmul(self.keys, torch.conj(state).unsqueeze(-1))
-        ).squeeze(-1)
+        ).squeeze(-1) / math.sqrt(self.keys.shape[-1])
         weights = torch.softmax(sim * self.beta, dim=0)
         return int(torch.argmax(weights).item()), sim
 
@@ -51,7 +52,8 @@ class ModernHopfieldMemory:
         """Retorna logits para top-k sampling"""
         if self.keys is None:
             raise ValueError("Keys not initialized. Call update_keys() first.")
+        # Dividir por sqrt(D) para normalizar similitud
         sim = torch.real(
             torch.matmul(self.keys, torch.conj(state).unsqueeze(-1))
-        ).squeeze(-1)
+        ).squeeze(-1) / math.sqrt(self.keys.shape[-1])
         return sim

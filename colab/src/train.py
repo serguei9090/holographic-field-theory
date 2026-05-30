@@ -85,6 +85,10 @@ def run_training_loop(
     num_train = len(train_ctx)
     num_val = len(val_ctx)
 
+    context_len = train_ctx.shape[1]
+    pos_angles = torch.arange(context_len, device=device).unsqueeze(1) * (math.pi / context_len)
+    pos_rotation = torch.complex(torch.cos(pos_angles), torch.sin(pos_angles)) # [C, D]
+
     for epoch in range(epochs):
         # ── TRAIN ──
         codebook.train()
@@ -97,16 +101,22 @@ def run_training_loop(
             ctx_b = train_ctx[idx]
             tgt_b = train_tgt[idx]
 
-            # Superposición holográfica: ψ = Σ e^{iθ_t}  (t ∈ contexto)
-            ctx_hv = codebook(ctx_b)                          # [B, C, D] complejo
-            psi = torch.sum(ctx_hv, dim=1)                 # [B, D]
-            psi = nn.functional.normalize(psi, p=2, dim=1) # normalizar magnitud
+            # Superposición holográfica posicional: ψ = Σ (e^{iθ_t} * pos_rot)
+            ctx_hv = codebook(ctx_b) * pos_rotation            # [B, C, D] complejo posicional
+            psi = torch.sum(ctx_hv, dim=1)                 # [B, D] complejo
+            
+            # Normalización compleja eficiente usando norma L2
+            norm = torch.clamp(torch.norm(psi, p=2, dim=1, keepdim=True), min=1e-12)
+            psi_r = psi.real / norm
+            psi_i = psi.imag / norm
 
-            # Similitud con todos los atractores del vocabulario
-            keys_all = codebook.all_keys()                      # [V, D]
-            logits = torch.real(torch.matmul(psi, torch.conj(keys_all).t()))  # [B, V]
+            # Similitud acelerada en aritmética real: real(A * conj(B)) = A_r*B_r + A_i*B_i
+            keys_r = torch.cos(codebook.phases)
+            keys_i = torch.sin(codebook.phases)
+            # Dividir por sqrt(D) para normalizar similitud
+            logits = (torch.matmul(psi_r, keys_r.t()) + torch.matmul(psi_i, keys_i.t())) / math.sqrt(codebook.phases.shape[1])
 
-            loss = nn.functional.cross_entropy(logits * 6.0, tgt_b)
+            loss = nn.functional.cross_entropy(logits * 16.0, tgt_b)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -126,14 +136,26 @@ def run_training_loop(
         with torch.no_grad():
             val_batches = math.ceil(num_val / batch_size)
             val_loss_sum = 0.0
+            keys_r = torch.cos(codebook.phases)
+            keys_i = torch.sin(codebook.phases)
+            # Precomputar rotación posicional para validación
+            context_len_val = val_ctx.shape[1]
+            pos_angles_val = torch.arange(context_len_val, device=device).unsqueeze(1) * (math.pi / context_len_val)
+            pos_rotation_val = torch.complex(torch.cos(pos_angles_val), torch.sin(pos_angles_val)) # [C, D]
+
             for b in range(val_batches):
                 ctx_v = val_ctx[b * batch_size : (b + 1) * batch_size]
                 tgt_v = val_tgt[b * batch_size : (b + 1) * batch_size]
-                ctx_hv = codebook(ctx_v)
-                psi_v = nn.functional.normalize(torch.sum(ctx_hv, dim=1), p=2, dim=1)
-                keys_all = codebook.all_keys()
-                logits_v = torch.real(torch.matmul(psi_v, torch.conj(keys_all).t()))
-                val_loss_sum += nn.functional.cross_entropy(logits_v * 6.0, tgt_v).item()
+                ctx_hv = codebook(ctx_v) * pos_rotation_val
+                psi_v = torch.sum(ctx_hv, dim=1)
+                
+                norm_v = torch.clamp(torch.norm(psi_v, p=2, dim=1, keepdim=True), min=1e-12)
+                psi_vr = psi_v.real / norm_v
+                psi_vi = psi_v.imag / norm_v
+                
+                # Dividir por sqrt(D) para normalizar similitud
+                logits_v = (torch.matmul(psi_vr, keys_r.t()) + torch.matmul(psi_vi, keys_i.t())) / math.sqrt(codebook.phases.shape[1])
+                val_loss_sum += nn.functional.cross_entropy(logits_v * 16.0, tgt_v).item()
 
         avg_train = epoch_loss / num_batches
         avg_val = val_loss_sum / val_batches

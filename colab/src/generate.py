@@ -27,13 +27,17 @@ def generate_text_topk(
     gen_idx = [token_to_idx[t] for t in valid_tok]
 
     with torch.no_grad():
+        # Precomputar rotación posicional para generación
+        pos_angles = torch.arange(context_len, device=device).unsqueeze(1) * (math.pi / context_len)
+        pos_rotation = torch.complex(torch.cos(pos_angles), torch.sin(pos_angles)) # [C, D]
+
         for _ in range(max_new):
             ctx = gen_idx[-context_len:]
             if len(ctx) < context_len:
                 ctx = ctx + [ctx[-1]] * (context_len - len(ctx))
 
             ctx_t = torch.tensor(ctx, device=device)
-            ctx_hv = codebook(ctx_t)
+            ctx_hv = codebook(ctx_t) * pos_rotation
             psi = nn.functional.normalize(torch.sum(ctx_hv, dim=0), p=2, dim=0)
             logits = hopfield_mem.query_topk(psi, k=k)
             # Clonar logits para aplicar la penalización sin modificar el objeto original

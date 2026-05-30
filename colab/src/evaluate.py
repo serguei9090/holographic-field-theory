@@ -23,18 +23,30 @@ def evaluate_model(
     num_val = len(val_ctx)
 
     with torch.no_grad():
+        keys_r = torch.cos(codebook.phases)
+        keys_i = torch.sin(codebook.phases)
+        # Precomputar rotación posicional para evaluación
+        context_len = val_ctx.shape[1]
+        pos_angles = torch.arange(context_len, device=val_ctx.device).unsqueeze(1) * (math.pi / context_len)
+        pos_rotation = torch.complex(torch.cos(pos_angles), torch.sin(pos_angles)) # [C, D]
+
         for b in range(math.ceil(num_val / batch_size)):
             ctx_v = val_ctx[b * batch_size : (b + 1) * batch_size]
             tgt_v = val_tgt[b * batch_size : (b + 1) * batch_size]
 
-            ctx_hv = codebook(ctx_v)
-            psi_v = nn.functional.normalize(torch.sum(ctx_hv, dim=1), p=2, dim=1)
-            keys_all = codebook.all_keys()
-            logits_v = torch.real(torch.matmul(psi_v, torch.conj(keys_all).t())) * 6.0
+            ctx_hv = codebook(ctx_v) * pos_rotation
+            psi_v = torch.sum(ctx_hv, dim=1)
+            
+            norm_v = torch.clamp(torch.norm(psi_v, p=2, dim=1, keepdim=True), min=1e-12)
+            psi_vr = psi_v.real / norm_v
+            psi_vi = psi_v.imag / norm_v
+            
+            # Dividir por sqrt(D) para normalizar similitud
+            logits_v = (torch.matmul(psi_vr, keys_r.t()) + torch.matmul(psi_vi, keys_i.t())) / math.sqrt(codebook.phases.shape[1])
 
             preds = torch.argmax(logits_v, dim=1)
             correct += (preds == tgt_v).sum().item()
-            total_ce += nn.functional.cross_entropy(logits_v, tgt_v, reduction='sum').item()
+            total_ce += nn.functional.cross_entropy(logits_v * 16.0, tgt_v, reduction='sum').item()
             n_val += len(tgt_v)
 
     accuracy = correct / n_val * 100
