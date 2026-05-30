@@ -36,6 +36,12 @@ def generate_text_topk(
             ctx_hv = codebook(ctx_t)
             psi = nn.functional.normalize(torch.sum(ctx_hv, dim=0), p=2, dim=0)
             logits = hopfield_mem.query_topk(psi, k=k)
+            # Clonar logits para aplicar la penalización sin modificar el objeto original
+            logits = logits.clone()
+            
+            # Penalizar tokens que ya están en el contexto para romper bucles repetitivos
+            for tok_idx in set(ctx):
+                logits[tok_idx] -= 35.0  # Penalización proporcional a la escala de similitud (~64.0 máx)
 
             # Top-k filtering
             topk_vals, topk_ids = torch.topk(logits, k)
