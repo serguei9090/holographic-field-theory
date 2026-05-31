@@ -2,6 +2,22 @@ import math
 import torch
 import torch.nn as nn
 
+class ComplexLayerNorm(nn.Module):
+    """
+    Normalización de amplitud en variables complejas.
+    Normaliza la magnitud (amplitud) de los fasores manteniendo la fase intacta.
+    """
+    def __init__(self, embedding_dim: int, eps: float = 1e-5):
+        super().__init__()
+        self.ln = nn.LayerNorm(embedding_dim, eps=eps)
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        mag = torch.abs(z)
+        phase = torch.angle(z)
+        mag_norm = self.ln(mag)
+        return torch.complex(mag_norm * torch.cos(phase), mag_norm * torch.sin(phase))
+
+
 class FHRRPhasorEmbedding(nn.Module):
     """
     Fourier Holographic Reduced Representation.
@@ -14,7 +30,6 @@ class FHRRPhasorEmbedding(nn.Module):
             torch.empty(num_embeddings, embedding_dim).uniform_(-math.pi, math.pi)
         )
         # Trainable positional attention weights
-        # Inicializado con decaimiento de 0.85
         init_weights = 0.85 ** torch.arange(context_len).flip(0)
         self.pos_weights = nn.Parameter(init_weights)
         
@@ -28,8 +43,10 @@ class FHRRPhasorEmbedding(nn.Module):
         self.register_buffer('pos_rotation_real', torch.cos(pos_angles))
         self.register_buffer('pos_rotation_imag', torch.sin(pos_angles))
 
+        # Capa de normalización de amplitud compleja
+        self.ln = ComplexLayerNorm(embedding_dim)
+
     def forward(self, indices: torch.Tensor) -> torch.Tensor:
-        # indices: [B, C] o [C]
         phi = self.phases[indices] # [B, C, D] o [C, D]
         x_real = torch.cos(phi)
         x_imag = torch.sin(phi)
@@ -56,13 +73,14 @@ class FHRRPhasorEmbedding(nn.Module):
         return torch.complex(torch.cos(self.phases), torch.sin(self.phases))
 
 
-class ModernHopfieldMemory:
+class ModernHopfieldMemory(nn.Module):
     """
     Recuperación de atractores mediante interferencia constructiva.
     Equivalente a cross-attention sin parámetros adicionales.
     """
     def __init__(self, beta: float = 16.0):
-        self.beta = beta
+        super().__init__()
+        self.beta = nn.Parameter(torch.tensor(beta))
         self.keys: torch.Tensor | None = None
 
     @torch.no_grad()
@@ -70,7 +88,7 @@ class ModernHopfieldMemory:
         self.keys = codebook.all_keys().detach()
 
     @torch.no_grad()
-    def query(self, state: torch.Tensor, refine_steps: int = 1) -> tuple[int, torch.Tensor]:
+    def query(self, state: torch.Tensor, refine_steps: int = 2) -> tuple[int, torch.Tensor]:
         """Retorna (índice_más_probable, similitudes_raw)"""
         if self.keys is None:
             raise ValueError("Keys not initialized. Call update_keys() first.")
@@ -85,7 +103,7 @@ class ModernHopfieldMemory:
         return int(torch.argmax(weights).item()), sim
 
     @torch.no_grad()
-    def query_topk(self, state: torch.Tensor, k: int = 5, refine_steps: int = 1) -> torch.Tensor:
+    def query_topk(self, state: torch.Tensor, k: int = 5, refine_steps: int = 2) -> torch.Tensor:
         """Retorna logits para top-k sampling"""
         if self.keys is None:
             raise ValueError("Keys not initialized. Call update_keys() first.")
@@ -99,7 +117,7 @@ class ModernHopfieldMemory:
         return sim
 
     @torch.no_grad()
-    def refine_query(self, state: torch.Tensor, steps: int = 1) -> torch.Tensor:
+    def refine_query(self, state: torch.Tensor, steps: int = 2) -> torch.Tensor:
         """
         Refina el vector de consulta state usando recuperación iterativa residual (Multi-Hop).
         state: [B, D] complejo o [D] complejo
@@ -125,7 +143,7 @@ class ModernHopfieldMemory:
             weights = torch.softmax(sim * self.beta, dim=-1) # [B, V]
             retrieved = torch.matmul(weights.to(self.keys.dtype), self.keys) # [B, D] complejo
             
-            # Conexión residual y normalización
+            # Conexión residual y normalización L2 para mantener magnitud unitaria
             refined = refined + retrieved
             norm = torch.clamp(torch.norm(refined, p=2, dim=-1, keepdim=True), min=1e-12)
             refined = refined / norm
@@ -133,3 +151,4 @@ class ModernHopfieldMemory:
         if is_single:
             refined = refined.squeeze(0)
         return refined
+

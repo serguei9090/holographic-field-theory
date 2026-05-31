@@ -15,7 +15,7 @@ def generate_text_topk(
     max_new: int = 20,
     k: int = 5,
     temperature: float = 0.8,
-    refine_steps: int = 1
+    refine_steps: int = 2
 ) -> str:
     """
     Genera texto usando top-k sampling con temperatura para diversidad.
@@ -29,6 +29,7 @@ def generate_text_topk(
     gen_idx = [token_to_idx[t] for t in valid_tok]
 
     with torch.no_grad():
+        D = codebook.phases.shape[1]
         for _ in range(max_new):
             ctx = gen_idx[-context_len:]
             if len(ctx) < context_len:
@@ -38,8 +39,9 @@ def generate_text_topk(
             # El binding y los pesos posicionales ya se aplican internamente en el codebook
             ctx_hv = codebook(ctx_t)
             psi = torch.sum(ctx_hv, dim=0)
-            norm = torch.clamp(torch.norm(psi, p=2, dim=0), min=1e-12)
-            psi = psi / norm
+            
+            # Normalización compleja estandarizada usando Complex LayerNorm
+            psi = codebook.ln(psi) / math.sqrt(D)
             
             logits = hopfield_mem.query_topk(psi, k=k, refine_steps=refine_steps)
             # Clonar logits para aplicar la penalización sin modificar el objeto original
@@ -70,7 +72,7 @@ def calculate_diversity(
     device: torch.device,
     k: int = 5,
     temperature: float = 0.8,
-    refine_steps: int = 1
+    refine_steps: int = 2
 ) -> float:
     print("── Métrica de Diversidad ──")
     all_generated_tokens = []
@@ -91,4 +93,5 @@ def calculate_diversity(
     print(f"  Tokens únicos           : {len(set(all_generated_tokens))}")
     print(f"  Diversity score         : {unique_ratio:.1f}%  (100% = sin repetición)")
     return unique_ratio
+
 

@@ -23,8 +23,8 @@ from train import prepare_dataset, run_training_loop
 from evaluate import evaluate_model, plot_and_save_results
 from generate import generate_text_topk, calculate_diversity
 
-# 4. Configurar Parámetros (Sync con Colab V3)
-DIMENSION     = 8192     # Dimensión de los fasores complejos
+# 4. Configurar Parámetros (Sync con Colab V4)
+DIMENSION     = 16384    # Dimensión de los fasores complejos (VSA escalada)
 CONTEXT_LEN   = 8        # Longitud de contexto (ventana)
 EPOCHS        = 10       # Épocas de entrenamiento
 LEARNING_RATE = 0.01
@@ -46,11 +46,11 @@ train_ctx, train_tgt, val_ctx, val_tgt, token_to_idx, idx_to_token, vocab, vocab
 
 # 6. Inicializar Componentes de CHFT
 codebook = FHRRPhasorEmbedding(vocab_size, DIMENSION, CONTEXT_LEN).to(DEVICE)
-hopfield_mem = ModernHopfieldMemory(beta=16.0)
+hopfield_mem = ModernHopfieldMemory(beta=16.0).to(DEVICE)
 hopfield_mem.update_keys(codebook)
 
-total_params = sum(p.numel() for p in codebook.parameters())
-print(f"✅ Parámetros del Codebook: {total_params:,} ({total_params * 4 / 1e6:.2f} MB en float32)")
+total_params = sum(p.numel() for p in codebook.parameters()) + sum(p.numel() for p in hopfield_mem.parameters())
+print(f"✅ Parámetros del Modelo: {total_params:,} ({total_params * 4 / 1e6:.2f} MB en float32)")
 
 # 7. Entrenar el Modelo
 loss_history, val_loss_history, elapsed = run_training_loop(
@@ -69,6 +69,7 @@ loss_history, val_loss_history, elapsed = run_training_loop(
 # 8. Evaluar Métricas
 accuracy, perplexity, base_acc = evaluate_model(
     codebook=codebook,
+    hopfield_mem=hopfield_mem,
     val_ctx=val_ctx,
     val_tgt=val_tgt,
     batch_size=BATCH_SIZE,
@@ -76,6 +77,7 @@ accuracy, perplexity, base_acc = evaluate_model(
     targets_tensor=targets_tensor,
     val_split=VAL_SPLIT
 )
+
 
 # 9. Generar Texto de Prueba
 test_prompts = [

@@ -7,6 +7,7 @@ import matplotlib.gridspec as gridspec
 
 def evaluate_model(
     codebook: nn.Module,
+    hopfield_mem: nn.Module,
     val_ctx: torch.Tensor,
     val_tgt: torch.Tensor,
     batch_size: int,
@@ -16,6 +17,7 @@ def evaluate_model(
 ):
     print("\nCalculando métricas de benchmark...")
     codebook.eval()
+    hopfield_mem.eval()
 
     correct = 0
     total_ce = 0.0
@@ -27,6 +29,7 @@ def evaluate_model(
         D = codebook.phases.shape[1]
         keys_r = keys_all.real
         keys_i = keys_all.imag
+        beta_val = hopfield_mem.beta.item()
         
         for b in range(math.ceil(num_val / batch_size)):
             ctx_v = val_ctx[b * batch_size : (b + 1) * batch_size]
@@ -35,17 +38,16 @@ def evaluate_model(
             ctx_hv = codebook(ctx_v)
             psi_v = torch.sum(ctx_hv, dim=1)
             
-            norm_v = torch.clamp(torch.norm(psi_v, p=2, dim=1, keepdim=True), min=1e-12)
-            psi_v = psi_v / norm_v
+            # Normalización compleja estandarizada usando Complex LayerNorm
+            psi_v = codebook.ln(psi_v) / math.sqrt(D)
             
-            # Refinamiento multi-hop en evaluación
-            for _ in range(1):
+            # Refinamiento multi-hop en evaluación (2 pasos)
+            for _ in range(2):
                 sim_ref = torch.real(torch.matmul(psi_v, torch.conj(keys_all).t())) / math.sqrt(D)
-                weights_ref = torch.softmax(sim_ref * 16.0, dim=-1)
+                weights_ref = torch.softmax(sim_ref * beta_val, dim=-1)
                 retrieved = torch.matmul(weights_ref.to(keys_all.dtype), keys_all)
                 psi_v = psi_v + retrieved
-                norm_v = torch.clamp(torch.norm(psi_v, p=2, dim=1, keepdim=True), min=1e-12)
-                psi_v = psi_v / norm_v
+                psi_v = codebook.ln(psi_v) / math.sqrt(D)
                 
             psi_vr = psi_v.real
             psi_vi = psi_v.imag
@@ -54,7 +56,7 @@ def evaluate_model(
 
             preds = torch.argmax(logits_v, dim=1)
             correct += (preds == tgt_v).sum().item()
-            total_ce += nn.functional.cross_entropy(logits_v * 16.0, tgt_v, reduction='sum').item()
+            total_ce += nn.functional.cross_entropy(logits_v * beta_val, tgt_v, reduction='sum').item()
             n_val += len(tgt_v)
 
     accuracy = correct / n_val * 100
@@ -62,6 +64,7 @@ def evaluate_model(
 
     print(f"  Accuracy@1  : {accuracy:.2f}%   (tokens exactos predichos)")
     print(f"  Perplexity  : {perplexity:.2f}  (menor = mejor; azar ≈ {vocab_size:,})")
+
 
     # Baseline
     token_freq = collections.Counter(targets_tensor.cpu().tolist())
