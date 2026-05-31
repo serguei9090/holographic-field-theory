@@ -1,3 +1,4 @@
+import os
 import math
 import time
 import torch
@@ -72,7 +73,9 @@ def run_training_loop(
     epochs: int,
     batch_size: int,
     learning_rate: float,
-    device: torch.device
+    device: torch.device,
+    checkpoint_path: str = "chft_checkpoint.pth",
+    reset_checkpoint: bool = False
 ):
     print("\nIniciando Entrenamiento CHFT...")
     # Optimizar conjuntamente fases, pesos posicionales y el parámetro beta
@@ -82,15 +85,49 @@ def run_training_loop(
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
+    start_epoch = 0
     loss_history = []
     val_loss_history = []
     t0 = time.time()
     
+    # Manejar reinicio forzado del checkpoint
+    if reset_checkpoint and os.path.exists(checkpoint_path):
+        try:
+            os.remove(checkpoint_path)
+            print(f"  🗑️ Checkpoint anterior eliminado por solicitud de --reset.")
+        except Exception as e:
+            print(f"  ⚠️ No se pudo eliminar el checkpoint: {e}")
+
+    # Intentar cargar checkpoint existente
+    if os.path.exists(checkpoint_path):
+        print(f"  ⏳ Cargando punto de control de entrenamiento desde: {checkpoint_path}...")
+        try:
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+            # Cargar pesos
+            codebook.load_state_dict(checkpoint['codebook_state_dict'])
+            hopfield_mem.load_state_dict(checkpoint['hopfield_state_dict'])
+            # Cargar optimizador y planificador
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            
+            start_epoch = checkpoint['epoch'] + 1
+            loss_history = checkpoint.get('loss_history', [])
+            val_loss_history = checkpoint.get('val_loss_history', [])
+            print(f"  ✅ Checkpoint cargado con éxito. Reanudando desde la Época {start_epoch + 1:02d}...")
+        except Exception as e:
+            print(f"  ⚠️ Advertencia al cargar checkpoint ({e}). Iniciando desde cero...")
+            start_epoch = 0
+            loss_history = []
+            val_loss_history = []
+
     num_train = len(train_ctx)
     num_val = len(val_ctx)
     D = codebook.phases.shape[1]
 
-    for epoch in range(epochs):
+    # Actualizar la memoria de Hopfield con las llaves iniciales del codebook cargado
+    hopfield_mem.update_keys(codebook)
+
+    for epoch in range(start_epoch, epochs):
         # ── TRAIN ──
         codebook.train()
         hopfield_mem.train()
@@ -103,14 +140,14 @@ def run_training_loop(
             ctx_b = train_ctx[idx]
             tgt_b = train_tgt[idx]
 
-            # Superposición holográfica posicional (Binding interno + Learned weights)
-            ctx_hv = codebook(ctx_b)                          # [B, C, D] complejo posicional
-            psi = torch.sum(ctx_hv, dim=1)                 # [B, D] complejo
+            # Superposición holográfica posicional (Binding interno + weights)
+            ctx_hv = codebook(ctx_b)                          # [B, C, D]
+            psi = torch.sum(ctx_hv, dim=1)                 # [B, D]
             
-            # Normalización estandarizada usando Complex LayerNorm
+            # Normalización compleja estandarizada usando Complex LayerNorm
             psi = codebook.ln(psi) / math.sqrt(D)
 
-            # Multi-Hop Refinement diferenciable en entrenamiento (2 pasos de refinación)
+            # Multi-Hop Refinement diferenciable en entrenamiento (2 pasos)
             keys_all = codebook.all_keys()
             for _ in range(2):
                 sim_ref = torch.real(torch.matmul(psi, torch.conj(keys_all).t())) / math.sqrt(D)
@@ -182,7 +219,22 @@ def run_training_loop(
 
         print(f"  Epoch {epoch+1:02d}/{epochs} | Train Loss: {avg_train:.4f} | Val Loss: {avg_val:.4f} | Beta: {hopfield_mem.beta.item():.4f}")
 
+        # Guardar checkpoint
+        try:
+            torch.save({
+                'epoch': epoch,
+                'codebook_state_dict': codebook.state_dict(),
+                'hopfield_state_dict': hopfield_mem.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'loss_history': loss_history,
+                'val_loss_history': val_loss_history
+            }, checkpoint_path)
+        except Exception as e:
+            print(f"  ⚠️ Error al guardar checkpoint: {e}")
+
     elapsed = time.time() - t0
     print(f"\n✅ Entrenamiento completado en {elapsed:.1f}s ({elapsed/60:.1f} min)")
     return loss_history, val_loss_history, elapsed
+
 

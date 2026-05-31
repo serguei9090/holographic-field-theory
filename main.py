@@ -1,7 +1,13 @@
 import os
 import sys
 import torch
+import argparse
 from dotenv import load_dotenv
+
+# Parse console arguments
+parser = argparse.ArgumentParser(description="CHFT Local Training Entry Point")
+parser.add_argument("--reset", action="store_true", help="Ignora y elimina el checkpoint de entrenamiento anterior para empezar desde cero")
+args = parser.parse_args()
 
 # 1. Enforce GPU (RTX 3060) to prevent running on CPU
 if not torch.cuda.is_available():
@@ -28,7 +34,7 @@ DIMENSION     = 16384    # Dimensión de los fasores complejos (VSA escalada)
 CONTEXT_LEN   = 8        # Longitud de contexto (ventana)
 EPOCHS        = 10       # Épocas de entrenamiento
 LEARNING_RATE = 0.01
-BATCH_SIZE    = 1024     # Batch size optimizado para GPU
+BATCH_SIZE    = 256     # Batch size optimizado para GPU
 NUM_STORIES   = 3000     # Cantidad de historias TinyStories
 TOPK          = 5        # Parámetro K para sampling de texto
 VAL_SPLIT     = 0.1      # 10% para validación
@@ -63,7 +69,9 @@ loss_history, val_loss_history, elapsed = run_training_loop(
     epochs=EPOCHS,
     batch_size=BATCH_SIZE,
     learning_rate=LEARNING_RATE,
-    device=DEVICE
+    device=DEVICE,
+    checkpoint_path="chft_checkpoint.pth",
+    reset_checkpoint=args.reset
 )
 
 # 8. Evaluar Métricas
