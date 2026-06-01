@@ -56,6 +56,18 @@ def prepare_dataset(num_stories: int, context_len: int, val_split: float, device
 
     print(f"      Train: {num_train:,} muestras | Val: {num_val:,} muestras")
     
+    # Guardar vocabulario en JSON para interact.py sin dependencias pesadas
+    import json
+    try:
+        with open("vocab.json", "w") as f:
+            json.dump({
+                "token_to_idx": {int(k): int(v) for k, v in token_to_idx.items()},
+                "idx_to_token": {int(k): int(v) for k, v in idx_to_token.items()}
+            }, f)
+        print("      Vocabulario guardado en 'vocab.json' con éxito.")
+    except Exception as e:
+        print(f"      ⚠️ No se pudo guardar el vocabulario: {e}")
+    
     return (
         train_ctx, train_tgt, 
         val_ctx, val_tgt, 
