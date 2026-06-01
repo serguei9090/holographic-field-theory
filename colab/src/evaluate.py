@@ -156,6 +156,8 @@ def plot_and_save_results(
     table.scale(1.2, 1.4)
     ax3.set_title("Resumen de Métricas", pad=12)
 
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"✅ Gráfico guardado como '{filename}'.")
     plt.show()
     print("✅ Figura mostrada en pantalla.")
     

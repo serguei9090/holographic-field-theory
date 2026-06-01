@@ -43,7 +43,7 @@ def generate_text_topk(
             # Normalización compleja estandarizada usando Complex LayerNorm
             psi = codebook.ln(psi) / math.sqrt(D)
             
-            logits = hopfield_mem.query_topk(psi, k=k, refine_steps=refine_steps)
+            logits = hopfield_mem.query_topk(psi, k=k, refine_steps=refine_steps, ln_fn=codebook.ln)
             # Clonar logits para aplicar la penalización sin modificar el objeto original
             logits = logits.clone()
             

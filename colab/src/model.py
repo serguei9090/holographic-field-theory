@@ -88,13 +88,13 @@ class ModernHopfieldMemory(nn.Module):
         self.keys = codebook.all_keys().detach()
 
     @torch.no_grad()
-    def query(self, state: torch.Tensor, refine_steps: int = 2) -> tuple[int, torch.Tensor]:
+    def query(self, state: torch.Tensor, refine_steps: int = 2, ln_fn = None) -> tuple[int, torch.Tensor]:
         """Retorna (índice_más_probable, similitudes_raw)"""
         if self.keys is None:
             raise ValueError("Keys not initialized. Call update_keys() first.")
         
         # Refinamiento multi-hop del estado
-        state = self.refine_query(state, steps=refine_steps)
+        state = self.refine_query(state, steps=refine_steps, ln_fn=ln_fn)
         
         sim = torch.real(
             torch.matmul(self.keys, torch.conj(state).unsqueeze(-1))
@@ -103,13 +103,13 @@ class ModernHopfieldMemory(nn.Module):
         return int(torch.argmax(weights).item()), sim
 
     @torch.no_grad()
-    def query_topk(self, state: torch.Tensor, k: int = 5, refine_steps: int = 2) -> torch.Tensor:
+    def query_topk(self, state: torch.Tensor, k: int = 5, refine_steps: int = 2, ln_fn = None) -> torch.Tensor:
         """Retorna logits para top-k sampling"""
         if self.keys is None:
             raise ValueError("Keys not initialized. Call update_keys() first.")
         
         # Refinamiento multi-hop del estado
-        state = self.refine_query(state, steps=refine_steps)
+        state = self.refine_query(state, steps=refine_steps, ln_fn=ln_fn)
         
         sim = torch.real(
             torch.matmul(self.keys, torch.conj(state).unsqueeze(-1))
@@ -117,7 +117,7 @@ class ModernHopfieldMemory(nn.Module):
         return sim
 
     @torch.no_grad()
-    def refine_query(self, state: torch.Tensor, steps: int = 2) -> torch.Tensor:
+    def refine_query(self, state: torch.Tensor, steps: int = 2, ln_fn = None) -> torch.Tensor:
         """
         Refina el vector de consulta state usando recuperación iterativa residual (Multi-Hop).
         state: [B, D] complejo o [D] complejo
@@ -143,10 +143,14 @@ class ModernHopfieldMemory(nn.Module):
             weights = torch.softmax(sim * self.beta, dim=-1) # [B, V]
             retrieved = torch.matmul(weights.to(self.keys.dtype), self.keys) # [B, D] complejo
             
-            # Conexión residual y normalización L2 para mantener magnitud unitaria
+            # Conexión residual y normalización
             refined = refined + retrieved
-            norm = torch.clamp(torch.norm(refined, p=2, dim=-1, keepdim=True), min=1e-12)
-            refined = refined / norm
+            if ln_fn is not None:
+                # Usar la misma normalización que en entrenamiento
+                refined = ln_fn(refined) / math.sqrt(D)
+            else:
+                norm = torch.clamp(torch.norm(refined, p=2, dim=-1, keepdim=True), min=1e-12)
+                refined = refined / norm
             
         if is_single:
             refined = refined.squeeze(0)

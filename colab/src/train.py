@@ -75,7 +75,8 @@ def run_training_loop(
     learning_rate: float,
     device: torch.device,
     checkpoint_path: str = "chft_checkpoint.pth",
-    reset_checkpoint: bool = False
+    reset_checkpoint: bool = False,
+    patience: int = 2
 ):
     print("\nIniciando Entrenamiento CHFT...")
     # Optimizar conjuntamente fases, pesos posicionales y el parámetro beta
@@ -221,7 +222,7 @@ def run_training_loop(
 
         # Guardar checkpoint
         try:
-            torch.save({
+            checkpoint_data = {
                 'epoch': epoch,
                 'codebook_state_dict': codebook.state_dict(),
                 'hopfield_state_dict': hopfield_mem.state_dict(),
@@ -229,9 +230,24 @@ def run_training_loop(
                 'scheduler_state_dict': scheduler.state_dict(),
                 'loss_history': loss_history,
                 'val_loss_history': val_loss_history
-            }, checkpoint_path)
+            }
+            torch.save(checkpoint_data, checkpoint_path)
+            
+            # Guardar el mejor checkpoint si la pérdida de validación mejoró
+            best_val_loss = min(val_loss_history)
+            if avg_val <= best_val_loss:
+                torch.save(checkpoint_data, "best_" + checkpoint_path)
+                print(f"  🏆 Nuevo mejor modelo guardado (Val Loss: {avg_val:.4f})")
         except Exception as e:
             print(f"  ⚠️ Error al guardar checkpoint: {e}")
+
+        # Verificar Early Stopping (Parada Temprana)
+        best_val_loss = min(val_loss_history)
+        best_epoch_idx = val_loss_history.index(best_val_loss)
+        epochs_no_improve = len(val_loss_history) - 1 - best_epoch_idx
+        if epochs_no_improve >= patience:
+            print(f"\n  🛑 Early stopping activado: La pérdida de validación no ha mejorado durante {patience} épocas. Deteniendo entrenamiento.")
+            break
 
     elapsed = time.time() - t0
     print(f"\n✅ Entrenamiento completado en {elapsed:.1f}s ({elapsed/60:.1f} min)")

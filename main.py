@@ -4,6 +4,14 @@ import torch
 import argparse
 from dotenv import load_dotenv
 
+# Reconfigure stdout/stderr to UTF-8 on Windows for emoji printing support
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
+
 # Parse console arguments
 parser = argparse.ArgumentParser(description="CHFT Local Training Entry Point")
 parser.add_argument("--reset", action="store_true", help="Ignora y elimina el checkpoint de entrenamiento anterior para empezar desde cero")
@@ -73,6 +81,18 @@ loss_history, val_loss_history, elapsed = run_training_loop(
     checkpoint_path="chft_checkpoint.pth",
     reset_checkpoint=args.reset
 )
+
+# Cargar el mejor checkpoint guardado para evaluación e inferencia
+best_checkpoint_path = "best_chft_checkpoint.pth"
+if os.path.exists(best_checkpoint_path):
+    print(f"\n🏆 Cargando el mejor punto de control encontrado: {best_checkpoint_path}")
+    try:
+        checkpoint = torch.load(best_checkpoint_path, map_location=DEVICE)
+        codebook.load_state_dict(checkpoint['codebook_state_dict'])
+        hopfield_mem.load_state_dict(checkpoint['hopfield_state_dict'])
+        hopfield_mem.update_keys(codebook)
+    except Exception as e:
+        print(f"  ⚠️ Error al cargar el mejor checkpoint: {e}")
 
 # 8. Evaluar Métricas
 accuracy, perplexity, base_acc = evaluate_model(
