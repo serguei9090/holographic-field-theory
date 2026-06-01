@@ -15,6 +15,11 @@ if sys.platform == 'win32':
 # Parse console arguments
 parser = argparse.ArgumentParser(description="CHFT Local Training Entry Point")
 parser.add_argument("--reset", action="store_true", help="Ignora y elimina el checkpoint de entrenamiento anterior para empezar desde cero")
+parser.add_argument("--stories", type=int, default=5000, help="Cantidad de historias a usar")
+parser.add_argument("--epochs", type=int, default=10, help="Épocas de entrenamiento")
+parser.add_argument("--dim", type=int, default=768, help="Dimensión de los fasores complejos")
+parser.add_argument("--context", type=int, default=64, help="Longitud de contexto")
+parser.add_argument("--batch_size", type=int, default=256, help="Tamaño de batch")
 args = parser.parse_args()
 
 # 1. Enforce GPU (RTX 3060) to prevent running on CPU
@@ -38,12 +43,12 @@ from evaluate import evaluate_model, plot_and_save_results
 from generate import generate_text_topk, calculate_diversity
 
 # 4. Configurar Parámetros (Sync con Colab V4)
-DIMENSION     = 768      # Dimensión de los fasores complejos (VSA escalada, igual a GPT-2)
-CONTEXT_LEN   = 64      # Longitud de contexto (ventana ampliada)
-EPOCHS        = 10       # Épocas de entrenamiento
+DIMENSION     = args.dim      # Dimensión de los fasores complejos (VSA de fase)
+CONTEXT_LEN   = args.context  # Longitud de contexto (ventana)
+EPOCHS        = args.epochs   # Épocas de entrenamiento
 LEARNING_RATE = 0.01
-BATCH_SIZE    = 256      # Batch size optimizado para GPU
-NUM_STORIES   = 5000     # Cantidad de historias TinyStories (escalado)
+BATCH_SIZE    = args.batch_size # Batch size
+NUM_STORIES   = args.stories  # Cantidad de historias TinyStories
 TOPK          = 5        # Parámetro K para sampling de texto
 VAL_SPLIT     = 0.1      # 10% para validación
 

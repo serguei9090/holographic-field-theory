@@ -21,7 +21,7 @@ def generate_text_topk(
     Genera texto usando top-k sampling con temperatura para diversidad.
     """
     codebook.eval()
-    tokens_in = tokenizer.encode(prompt)
+    tokens_in = tokenizer.encode(prompt, allowed_special="all")
     valid_tok = [t for t in tokens_in if t in token_to_idx]
     if not valid_tok:
         return "[tokens del prompt fuera del vocabulario]"
@@ -82,7 +82,7 @@ def calculate_diversity(
             token_to_idx, idx_to_token, context_len, device,
             max_new=50, k=k, temperature=temperature, refine_steps=refine_steps
         )
-        raw = tokenizer.encode(generated_text)
+        raw = tokenizer.encode(generated_text, allowed_special="all")
         all_generated_tokens.extend(raw)
 
     if not all_generated_tokens:

@@ -22,6 +22,9 @@ parser.add_argument("--dim", type=int, default=0, help="Embedding/hidden dimensi
 parser.add_argument("--reset", action="store_true", help="Ignore and delete prior checkpoint")
 parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
 parser.add_argument("--lr", type=float, default=0.0005, help="Learning rate (default 5e-4 for stable training)")
+parser.add_argument("--stories", type=int, default=5000, help="Number of stories to use")
+parser.add_argument("--context", type=int, default=64, help="Context length")
+parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
 args = parser.parse_args()
 
 # Enforce GPU
@@ -40,11 +43,11 @@ from train import prepare_dataset
 from transformer_baseline import TransformerLM
 
 # Set configuration parameters matching current CHFT configs
-CONTEXT_LEN   = 64
+CONTEXT_LEN   = args.context
 EPOCHS        = args.epochs
 LEARNING_RATE = args.lr
-BATCH_SIZE    = 256
-NUM_STORIES   = 5000
+BATCH_SIZE    = args.batch_size
+NUM_STORIES   = args.stories
 VAL_SPLIT     = 0.1
 TOPK          = 5
 
@@ -239,7 +242,7 @@ test_prompts = [
 
 def generate_text_topk(model, prompt, tokenizer, token_to_idx, idx_to_token, max_seq_len, device, max_new=20, k=5, temperature=0.8):
     model.eval()
-    tokens = tokenizer.encode(prompt)
+    tokens = tokenizer.encode(prompt, allowed_special="all")
     input_ids = [token_to_idx[t] for t in tokens if t in token_to_idx]
     if not input_ids:
         input_ids = [token_to_idx[tokenizer.eot_token]]
@@ -281,7 +284,7 @@ for prompt, length in test_prompts:
     print(f"  📝 Prompt : '{prompt}'")
     print(f"     Output : {res}\n")
     
-    all_generated_tokens.extend(tokenizer.encode(res))
+    all_generated_tokens.extend(tokenizer.encode(res, allowed_special="all"))
 
 # Diversity metric
 unique_toks = len(set(all_generated_tokens))

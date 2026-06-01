@@ -1,6 +1,9 @@
 # CHFT Project Roadmap
 *Complex Holographic/Hopfield Feature Representation (CHFT)*
 
+> [!NOTE]
+> Para un análisis profundo de la matemática cuántica de la versión 3 y las propuestas para la versión 4 y 5, consulta el documento principal: [CHFT_Paradigm_and_Roadmap.md](file:///i:/01-Master_Code/Test-Labs/01-CHFT/CHFT_Paradigm_and_Roadmap.md).
+
 This roadmap details the progression phases for building, refining, and testing the CHFT model to surpass traditional LLM baselines, achieve massive scaling, and implement advanced features like dynamic memory injection, tool usage, reasoning ("thinking mode"), and holographic RAG retrieval.
 
 ---

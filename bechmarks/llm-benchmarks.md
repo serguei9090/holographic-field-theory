@@ -11,6 +11,8 @@ Este documento sirve como referencia rápida para ver la evolución del modelo *
 | **Official TinyStories 1-Layer** | **18.0% - 25.0%** | **9.00 - 11.00** | **Bajo** | 512 | ~21M | Completo | Transformer de 1 capa. Genera gramática básica pero carece de estructura lógica. |
 | **Local Transformer 2-Layer** | *TBD* | *TBD* | *TBD* | 64 | ~12.5M | 5,000 | Baseline local de 2 capas con dim=512. Por entrenar. |
 | **Local Transformer 1-Layer** | **42.36%** | **15.35** | **33.1%** | 64 | 3.1M | 5,000 | Baseline local de 1 capa con dim=256. Bucles repetitivos. |
+| **Local Transformer 1-L (Fast Run)** | **37.10%** | **23.27** | **28.9%** | 64 | 11.3M | 1,000 | Baseline de 1 capa rápido para iteración (dim=768). |
+| **CHFT v2 (Fast Run)** | **28.49%** | **51.95** | **80.8%** | 64 | 4.2M | 1,000 | CHFT v2 restaurado para iteración rápida (dim=768). |
 | **CHFT v2 (Nano - This Run)** | **33.16%** | **30.04** | **81.9%** | 64 | 6.8M | 5,000 | Run actual con contexto 64. Supera al baseline de frecuencias pero inferior en Acc a Transf 1L. |
 | **CHFT v2 (Nano - Prev Run)** | **30.27%** | **37.95** | **77.2%** | 8 | 5.8M | 3,000 | Run anterior con contexto 8 y parada temprana en la época 8. |
 | **CHFT v3 (Learned Attn + Multi-Hop)** | **32.70%** | **33.58** | **47.6%** | 8 | ~62M | 3,000 | Versión anterior optimizada con Hopfield Multi-Hop. |
