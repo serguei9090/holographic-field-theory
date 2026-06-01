@@ -45,8 +45,9 @@ def prepare_dataset(num_stories: int, context_len: int, val_split: float, device
     contexts_tensor = torch.tensor(contexts_list, dtype=torch.long)
     targets_tensor = torch.tensor(targets_list, dtype=torch.long)
 
-    # Shuffle antes de split
-    perm = torch.randperm(num_total)
+    # Shuffle antes de split con semilla fija para consistencia al reanudar
+    g = torch.Generator().manual_seed(42)
+    perm = torch.randperm(num_total, generator=g)
     contexts_tensor = contexts_tensor[perm].to(device)
     targets_tensor = targets_tensor[perm].to(device)
 

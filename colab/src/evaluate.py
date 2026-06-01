@@ -112,18 +112,18 @@ def plot_and_save_results(
     # ── Panel 2: Comparativa Accuracy (3 barras) ──
     ax2 = fig.add_subplot(gs[1, 0])
     bars = ax2.bar(
-        ["Baseline\n(freq)", "CHFT v2\n(nuestro)", "LLM\n(Transformer)"],
-        [base_acc, accuracy, 35.0],
+        ["Baseline\n(freq)", "CHFT v2\n(nuestro)", "LLM 124M\n(Transformer)"],
+        [base_acc, accuracy, 70.0],
         color=["#94A3B8", "#7C3AED", "#10B981"],
         width=0.5,
         edgecolor="white"
     )
-    for bar, val in zip(bars, [base_acc, accuracy, 35.0]):
+    for bar, val in zip(bars, [base_acc, accuracy, 70.0]):
         ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.2,
                  f"{val:.1f}%", ha='center', va='bottom', fontweight='bold')
     ax2.set_title("Accuracy@1: Comparativa de Modelos")
     ax2.set_ylabel("Accuracy (%)")
-    ax2.set_ylim(0, max(accuracy, base_acc, 35.0) * 1.3)
+    ax2.set_ylim(0, max(accuracy, base_acc, 70.0) * 1.3)
     ax2.grid(True, axis='y', alpha=0.3)
 
     # ── Panel 3: Métricas resumen ──
@@ -140,9 +140,9 @@ def plot_and_save_results(
         ["Train Loss final",    f"{loss_history[-1]:.4f}"],
         ["Val Loss final",      f"{val_loss_history[-1]:.4f}"],
         ["Accuracy@1",          f"{accuracy:.2f}%"],
-        ["Target LLM Acc",      "35.00%"],
+        ["Target LLM Acc",      "70.00%"],
         ["Perplexity",          f"{perplexity:.1f}"],
-        ["Target LLM PPL",      "8.0"],
+        ["Target LLM PPL",      "1.12"],
         ["Diversity Score",     f"{unique_ratio:.1f}%"],
     ]
     table = ax3.table(
@@ -175,8 +175,8 @@ def plot_and_save_results(
     print(f"Val Loss Final     : {val_loss_history[-1]:.4f}")
     print(f"Accuracy@1 (CHFT)  : {accuracy:.2f}%")
     print(f"Accuracy@1 (Base)  : {base_acc:.2f}%")
-    print(f"Accuracy@1 (LLM)   : 35.00% (Brecha con LLM: -{35.0 - accuracy:.2f}pp)")
+    print(f"Accuracy@1 (LLM)   : 70.00% (Brecha con LLM: -{70.0 - accuracy:.2f}pp)")
     print(f"Perplexity (CHFT)  : {perplexity:.2f}")
-    print(f"Perplexity (LLM)   : 8.00 (Brecha con LLM: +{perplexity - 8.0:.2f})")
+    print(f"Perplexity (LLM)   : 1.12 (Brecha con LLM: +{perplexity - 1.12:.2f})")
     print(f"Diversity Score    : {unique_ratio:.1f}%")
     print("="*50 + "\n")
