@@ -38,13 +38,10 @@ def generate_text_topk(
             ctx_t = torch.tensor(ctx, device=device)
             # El binding y los pesos posicionales ya se aplican internamente en el codebook
             ctx_hv = codebook(ctx_t)
-            psi = torch.sum(ctx_hv, dim=0)
+            psi = codebook.bundle_multiscale(ctx_hv)
+            psi = codebook.process_bundle(psi)
             
-            # Normalización compleja estandarizada usando Complex LayerNorm
-            psi = codebook.ln(psi) / math.sqrt(D)
-            
-            logits = hopfield_mem.query_topk(psi, k=k, refine_steps=refine_steps, ln_fn=codebook.ln)
-            # Clonar logits para aplicar la penalización sin modificar el objeto original
+            logits = hopfield_mem.refine_and_predict(psi, codebook, steps=refine_steps)
             logits = logits.clone()
             
             # Penalizar tokens que ya están en el contexto para romper bucles repetitivos
@@ -52,6 +49,9 @@ def generate_text_topk(
                 logits[tok_idx] -= 35.0  # Penalización proporcional a la escala de similitud (~64.0 máx)
 
             # Top-k filtering
+            if len(logits.shape) > 1:
+                logits = logits.squeeze(0) # In case of batched evaluation with B=1
+                
             topk_vals, topk_ids = torch.topk(logits, k)
             scaled = topk_vals / temperature
             probs = torch.softmax(scaled, dim=0)
@@ -93,5 +93,3 @@ def calculate_diversity(
     print(f"  Tokens únicos           : {len(set(all_generated_tokens))}")
     print(f"  Diversity score         : {unique_ratio:.1f}%  (100% = sin repetición)")
     return unique_ratio
-
-

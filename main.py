@@ -65,8 +65,7 @@ train_ctx, train_tgt, val_ctx, val_tgt, token_to_idx, idx_to_token, vocab, vocab
 
 # 6. Inicializar Componentes de CHFT
 codebook = FHRRPhasorEmbedding(vocab_size, DIMENSION, CONTEXT_LEN).to(DEVICE)
-hopfield_mem = ModernHopfieldMemory(beta=16.0).to(DEVICE)
-hopfield_mem.update_keys(codebook)
+hopfield_mem = ModernHopfieldMemory(DIMENSION, beta=16.0).to(DEVICE)
 
 total_params = sum(p.numel() for p in codebook.parameters()) + sum(p.numel() for p in hopfield_mem.parameters())
 print(f"✅ Parámetros del Modelo: {total_params:,} ({total_params * 4 / 1e6:.2f} MB en float32)")
@@ -95,7 +94,6 @@ if os.path.exists(best_checkpoint_path):
         checkpoint = torch.load(best_checkpoint_path, map_location=DEVICE, weights_only=True)
         codebook.load_state_dict(checkpoint['codebook_state_dict'])
         hopfield_mem.load_state_dict(checkpoint['hopfield_state_dict'])
-        hopfield_mem.update_keys(codebook)
     except Exception as e:
         print(f"  ⚠️ Error al cargar el mejor checkpoint: {e}")
 

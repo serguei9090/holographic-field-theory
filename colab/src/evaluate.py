@@ -26,10 +26,6 @@ def evaluate_model(
     num_val = len(val_ctx)
 
     with torch.no_grad():
-        keys_all = codebook.all_keys()
-        D = codebook.phases.shape[1]
-        keys_r = keys_all.real
-        keys_i = keys_all.imag
         beta_val = hopfield_mem.beta.item()
         
         for b in range(math.ceil(num_val / batch_size)):
@@ -37,23 +33,10 @@ def evaluate_model(
             tgt_v = val_tgt[b * batch_size : (b + 1) * batch_size]
 
             ctx_hv = codebook(ctx_v)
-            psi_v = torch.sum(ctx_hv, dim=1)
+            psi_v = codebook.bundle_multiscale(ctx_hv)
+            psi_v = codebook.process_bundle(psi_v)
             
-            # Normalización compleja estandarizada usando Complex LayerNorm
-            psi_v = codebook.ln(psi_v) / math.sqrt(D)
-            
-            # Refinamiento multi-hop en evaluación (2 pasos)
-            for _ in range(2):
-                sim_ref = torch.real(torch.matmul(psi_v, torch.conj(keys_all).t())) / math.sqrt(D)
-                weights_ref = torch.softmax(sim_ref * beta_val, dim=-1)
-                retrieved = torch.matmul(weights_ref.to(keys_all.dtype), keys_all)
-                psi_v = psi_v + retrieved
-                psi_v = codebook.ln(psi_v) / math.sqrt(D)
-                
-            psi_vr = psi_v.real
-            psi_vi = psi_v.imag
-            
-            logits_v = (torch.matmul(psi_vr, keys_r.t()) + torch.matmul(psi_vi, keys_i.t())) / math.sqrt(D)
+            logits_v = hopfield_mem.refine_and_predict(psi_v, codebook, steps=2)
 
             preds = torch.argmax(logits_v, dim=1)
             correct += (preds == tgt_v).sum().item()
@@ -73,7 +56,7 @@ def evaluate_model(
     base_correct = sum(1 for t in val_tgt.cpu().tolist() if t == most_common)
     base_acc = base_correct / num_val * 100
     print(f"\n  [Baseline freq] Accuracy@1: {base_acc:.2f}%  (siempre predice token más frecuente)")
-    print(f"  [CHFT v2]       Accuracy@1: {accuracy:.2f}%  (+{accuracy - base_acc:.2f}pp vs baseline)")
+    print(f"  [CHFT v5]       Accuracy@1: {accuracy:.2f}%  (+{accuracy - base_acc:.2f}pp vs baseline)")
 
     return accuracy, perplexity, base_acc
 
@@ -98,7 +81,7 @@ def plot_and_save_results(
     if generate_png:
         print("\nGraficando resultados...")
         fig = plt.figure(figsize=(14, 10))
-        fig.suptitle("CHFT v2 — Campos Holográficos de Fourier: Resultados", fontsize=14, fontweight='bold')
+        fig.suptitle("CHFT v5 — Multi-Head & H-FFN: Resultados", fontsize=14, fontweight='bold')
         gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.45, wspace=0.35)
 
         epochs_ax = range(1, actual_epochs + 1)
@@ -116,8 +99,8 @@ def plot_and_save_results(
 
         # ── Panel 2: Comparativa Accuracy (4 barras) ──
         ax2 = fig.add_subplot(gs[1, 0])
-        labels = ["Baseline\n(freq)", "CHFT v2\n(nuestro)", "Transformer\n1-Layer", "Transformer\n2-Layer"]
-        values = [base_acc, accuracy, 42.36, 37.5]
+        labels = ["Baseline\n(freq)", "CHFT v5\n(nuestro)", "Transformer\n1-Layer", "Transformer\n2-Layer"]
+        values = [base_acc, accuracy, 37.10, 37.5]
         bars = ax2.bar(
             labels,
             values,
@@ -147,11 +130,9 @@ def plot_and_save_results(
             ["Train Loss final",    f"{loss_history[-1]:.4f}"],
             ["Val Loss final",      f"{val_loss_history[-1]:.4f}"],
             ["Accuracy@1",          f"{accuracy:.2f}%"],
-            ["Tgt Transf 1-L Acc",  "42.36%"],
-            ["Tgt Transf 2-L Acc",  "37.50%"],
+            ["Tgt Transf 1-L Acc",  "37.10%"],
             ["Perplexity",          f"{perplexity:.1f}"],
-            ["Tgt Transf 1-L PPL",  "15.35"],
-            ["Tgt Transf 2-L PPL",  "7.0"],
+            ["Tgt Transf 1-L PPL",  "23.27"],
             ["Diversity Score",     f"{unique_ratio:.1f}%"],
             ["Peak VRAM (GPU)",     f"{peak_vram:.1f} MB"],
         ]
@@ -175,7 +156,7 @@ def plot_and_save_results(
     
     # Imprimir un resumen en texto fácil de copiar y pegar
     print("\n" + "="*50)
-    print("📊 RESUMEN DE MÉTRICAS (CHFT v2 Benchmark)")
+    print("📊 RESUMEN DE MÉTRICAS (CHFT v5 Benchmark)")
     print("="*50)
     print(f"Dimensión FHRR     : {dimension:,}")
     print(f"Vocabulario        : {vocab_size:,} tokens")
@@ -187,11 +168,9 @@ def plot_and_save_results(
     print(f"Val Loss Final     : {val_loss_history[-1]:.4f}")
     print(f"Accuracy@1 (CHFT)  : {accuracy:.2f}%")
     print(f"Accuracy@1 (Base)  : {base_acc:.2f}%")
-    print(f"Acc (Transf 1-Layer): 42.36% (Brecha: {accuracy - 42.36:+.2f}pp)")
-    print(f"Acc (Transf 2-Layer): 37.50% (Brecha: {accuracy - 37.5:+.2f}pp)")
+    print(f"Acc (Transf 1-Layer): 37.10% (Brecha: {accuracy - 37.10:+.2f}pp)")
     print(f"Perplexity (CHFT)  : {perplexity:.2f}")
-    print(f"PPL (Transf 1-Layer): 15.35 (Brecha: {perplexity - 15.35:+.2f})")
-    print(f"PPL (Transf 2-Layer): 7.00 (Brecha: {perplexity - 7.00:+.2f})")
+    print(f"PPL (Transf 1-Layer): 23.27 (Brecha: {perplexity - 23.27:+.2f})")
     print(f"Diversity Score    : {unique_ratio:.1f}%")
     print(f"Peak VRAM (GPU)    : {peak_vram:.1f} MB")
     print("="*50 + "\n")

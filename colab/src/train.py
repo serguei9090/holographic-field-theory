@@ -98,8 +98,8 @@ def run_training_loop(
     reset_checkpoint: bool = False,
     patience: int = 2
 ):
-    print("\nIniciando Entrenamiento CHFT...")
-    # Optimizar conjuntamente fases, pesos posicionales y el parámetro beta
+    print("\nIniciando Entrenamiento CHFT v5...")
+    # Optimizar conjuntamente fases, pesos posicionales, MLP, proyecciones QK y beta
     optimizer = torch.optim.Adam(
         list(codebook.parameters()) + list(hopfield_mem.parameters()), 
         lr=learning_rate
@@ -111,7 +111,6 @@ def run_training_loop(
     val_loss_history = []
     t0 = time.time()
     
-    # Manejar reinicio forzado del checkpoint
     if reset_checkpoint and os.path.exists(checkpoint_path):
         try:
             os.remove(checkpoint_path)
@@ -119,18 +118,14 @@ def run_training_loop(
         except Exception as e:
             print(f"  ⚠️ No se pudo eliminar el checkpoint: {e}")
 
-    # Intentar cargar checkpoint existente
     if os.path.exists(checkpoint_path):
         print(f"  ⏳ Cargando punto de control de entrenamiento desde: {checkpoint_path}...")
         try:
             checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
-            # Cargar pesos
             codebook.load_state_dict(checkpoint['codebook_state_dict'])
             hopfield_mem.load_state_dict(checkpoint['hopfield_state_dict'])
-            # Cargar optimizador y planificador
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            
             start_epoch = checkpoint['epoch'] + 1
             loss_history = checkpoint.get('loss_history', [])
             val_loss_history = checkpoint.get('val_loss_history', [])
@@ -145,9 +140,6 @@ def run_training_loop(
     num_val = len(val_ctx)
     D = codebook.phases.shape[1]
 
-    # Actualizar la memoria de Hopfield con las llaves iniciales del codebook cargado
-    hopfield_mem.update_keys(codebook)
-
     for epoch in range(start_epoch, epochs):
         # ── TRAIN ──
         codebook.train()
@@ -161,30 +153,19 @@ def run_training_loop(
             ctx_b = train_ctx[idx]
             tgt_b = train_tgt[idx]
 
-            # Superposición holográfica posicional (Binding interno + weights)
+            # 1. Holographic Binding with Multi-Head Gates
             ctx_hv = codebook(ctx_b)                          # [B, C, D]
-            psi = torch.sum(ctx_hv, dim=1)                 # [B, D]
             
-            # Normalización compleja estandarizada usando Complex LayerNorm
-            psi = codebook.ln(psi) / math.sqrt(D)
+            # 2. Multi-Scale Bundling
+            psi = codebook.bundle_multiscale(ctx_hv)          # [B, D]
+            
+            # 3. Holographic FFN (Complex Non-Linear + Transform)
+            psi = codebook.process_bundle(psi)                # [B, D]
+            
+            # 4. Multi-Hop Refinement with QK projections
+            logits = hopfield_mem.refine_and_predict(psi, codebook, steps=2)
 
-            # Multi-Hop Refinement diferenciable en entrenamiento (2 pasos)
-            keys_all = codebook.all_keys()
-            for _ in range(2):
-                sim_ref = torch.real(torch.matmul(psi, torch.conj(keys_all).t())) / math.sqrt(D)
-                weights_ref = torch.softmax(sim_ref * hopfield_mem.beta, dim=-1)
-                retrieved = torch.matmul(weights_ref.to(keys_all.dtype), keys_all)
-                psi = psi + retrieved
-                psi = codebook.ln(psi) / math.sqrt(D)
-
-            # Proyección final para obtener logits
-            psi_r = psi.real
-            psi_i = psi.imag
-            keys_r = keys_all.real
-            keys_i = keys_all.imag
-            logits = (torch.matmul(psi_r, keys_r.t()) + torch.matmul(psi_i, keys_i.t())) / math.sqrt(D)
-
-            # Usar la escala beta entrenable
+            # Optimización
             loss = nn.functional.cross_entropy(logits * hopfield_mem.beta, tgt_b)
             optimizer.zero_grad()
             loss.backward()
@@ -198,7 +179,6 @@ def run_training_loop(
             epoch_loss += loss.item()
 
         scheduler.step()
-        hopfield_mem.update_keys(codebook)
 
         # ── VALIDACIÓN ──
         codebook.eval()
@@ -206,31 +186,17 @@ def run_training_loop(
         with torch.no_grad():
             val_batches = math.ceil(num_val / batch_size)
             val_loss_sum = 0.0
-            keys_all = codebook.all_keys()
             
-            keys_r = keys_all.real
-            keys_i = keys_all.imag
             for b in range(val_batches):
                 ctx_v = val_ctx[b * batch_size : (b + 1) * batch_size]
                 tgt_v = val_tgt[b * batch_size : (b + 1) * batch_size]
                 
                 ctx_hv = codebook(ctx_v)
-                psi_v = torch.sum(ctx_hv, dim=1)
+                psi_v = codebook.bundle_multiscale(ctx_hv)
+                psi_v = codebook.process_bundle(psi_v)
                 
-                psi_v = codebook.ln(psi_v) / math.sqrt(D)
+                logits_v = hopfield_mem.refine_and_predict(psi_v, codebook, steps=2)
                 
-                # Refinamiento en validación (2 pasos)
-                for _ in range(2):
-                    sim_ref = torch.real(torch.matmul(psi_v, torch.conj(keys_all).t())) / math.sqrt(D)
-                    weights_ref = torch.softmax(sim_ref * hopfield_mem.beta, dim=-1)
-                    retrieved = torch.matmul(weights_ref.to(keys_all.dtype), keys_all)
-                    psi_v = psi_v + retrieved
-                    psi_v = codebook.ln(psi_v) / math.sqrt(D)
-                
-                psi_vr = psi_v.real
-                psi_vi = psi_v.imag
-                
-                logits_v = (torch.matmul(psi_vr, keys_r.t()) + torch.matmul(psi_vi, keys_i.t())) / math.sqrt(D)
                 val_loss_sum += nn.functional.cross_entropy(logits_v * hopfield_mem.beta, tgt_v).item()
 
         avg_train = epoch_loss / num_batches
@@ -240,7 +206,6 @@ def run_training_loop(
 
         print(f"  Epoch {epoch+1:02d}/{epochs} | Train Loss: {avg_train:.4f} | Val Loss: {avg_val:.4f} | Beta: {hopfield_mem.beta.item():.4f}")
 
-        # Guardar checkpoint
         try:
             checkpoint_data = {
                 'epoch': epoch,
@@ -253,7 +218,6 @@ def run_training_loop(
             }
             torch.save(checkpoint_data, checkpoint_path)
             
-            # Guardar el mejor checkpoint si la pérdida de validación mejoró
             best_val_loss = min(val_loss_history)
             if avg_val <= best_val_loss:
                 torch.save(checkpoint_data, "best_" + checkpoint_path)
@@ -261,7 +225,6 @@ def run_training_loop(
         except Exception as e:
             print(f"  ⚠️ Error al guardar checkpoint: {e}")
 
-        # Verificar Early Stopping (Parada Temprana)
         best_val_loss = min(val_loss_history)
         best_epoch_idx = val_loss_history.index(best_val_loss)
         epochs_no_improve = len(val_loss_history) - 1 - best_epoch_idx
@@ -272,5 +235,3 @@ def run_training_loop(
     elapsed = time.time() - t0
     print(f"\n✅ Entrenamiento completado en {elapsed:.1f}s ({elapsed/60:.1f} min)")
     return loss_history, val_loss_history, elapsed
-
-
