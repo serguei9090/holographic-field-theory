@@ -99,3 +99,8 @@ El trabajo futuro se centrará en:
 El proyecto completo, incluyendo los scripts de entrenamiento (`train.py`), evaluación (`evaluate.py`), y el backend de interferencia holográfica, está disponible públicamente en nuestro repositorio de GitHub. 
 
 * **Repositorio del Proyecto:** [CHFT en GitHub (Repositorio de Laboratorio)](file:///i:/01-Master_Code/Test-Labs/01-CHFT/)
+* **Commit del Paradigma v1 (CHFT v6):** `68c850679e25cb3b385785bcffeb9c7a431a4043`
+  Para reproducir exactamente los resultados de este artículo (CHFT v6), clona el repositorio y cámbiate a este commit ejecutando:
+  ```bash
+  git checkout 68c850679e25cb3b385785bcffeb9c7a431a4043
+  ```
