@@ -53,18 +53,20 @@ def main():
     vocab_size = len(token_to_idx)
     print(f"✅ Loaded vocabulary of {vocab_size:,} tokens.")
     
-    # 4. Config variables (must match training run)
-    DIMENSION = 16384
-    CONTEXT_LEN = 8
-    
-    # 5. Build and Load Model
-    print(f"⏳ Initializing model with Dim={DIMENSION}, Context={CONTEXT_LEN}...")
-    codebook = FHRRPhasorEmbedding(vocab_size, DIMENSION, CONTEXT_LEN).to(device)
-    hopfield_mem = ModernHopfieldMemory().to(device)
-    
+    # 5. Load and Initialize Model dynamically from checkpoint
     print(f"⏳ Loading weights from '{checkpoint_path}'...")
     try:
         checkpoint = torch.load(checkpoint_path, map_location=device)
+        
+        # Detect parameters dynamically from the checkpoint
+        DIMENSION = checkpoint['codebook_state_dict']['phases'].shape[1]
+        CONTEXT_LEN = checkpoint['codebook_state_dict']['pos_weights'].shape[0]
+        print(f"⚙️ Detected parameters from checkpoint: Dim={DIMENSION}, Context={CONTEXT_LEN}")
+        
+        print(f"⏳ Initializing model architecture...")
+        codebook = FHRRPhasorEmbedding(vocab_size, DIMENSION, CONTEXT_LEN).to(device)
+        hopfield_mem = ModernHopfieldMemory().to(device)
+        
         codebook.load_state_dict(checkpoint['codebook_state_dict'])
         hopfield_mem.load_state_dict(checkpoint['hopfield_state_dict'])
         hopfield_mem.update_keys(codebook)

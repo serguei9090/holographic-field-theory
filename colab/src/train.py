@@ -15,6 +15,8 @@ def prepare_dataset(num_stories: int, context_len: int, val_split: float, device
     print("      Tokenizando y extrayendo vocabulario...")
     all_token_ids = set()
     stories_tokenized = []
+    eot_token = tokenizer.eot_token
+    all_token_ids.add(eot_token)
 
     for item in dataset:
         tokens = tokenizer.encode(item["text"])
@@ -28,15 +30,20 @@ def prepare_dataset(num_stories: int, context_len: int, val_split: float, device
 
     print(f"      Vocabulario: {vocab_size:,} tokens únicos")
 
-    # Construir tensores de contexto/objetivo
-    contexts_list, targets_list = [], []
+    # Concatenar todas las historias en una secuencia larga separadas por EOT
+    flat_tokens = []
     for story in stories_tokenized:
-        if len(story) < context_len + 1:
-            continue
-        story_idx = [token_to_idx[t] for t in story]
-        for i in range(len(story_idx) - context_len):
-            contexts_list.append(story_idx[i : i + context_len])
-            targets_list.append(story_idx[i + context_len])
+        flat_tokens.extend(story)
+        flat_tokens.append(eot_token)
+
+    # Convertir a índices de vocabulario
+    flat_indices = [token_to_idx[t] for t in flat_tokens]
+
+    # Construir tensores de contexto/objetivo con ventana deslizante
+    contexts_list, targets_list = [], []
+    for i in range(len(flat_indices) - context_len):
+        contexts_list.append(flat_indices[i : i + context_len])
+        targets_list.append(flat_indices[i + context_len])
 
     num_total = len(contexts_list)
     num_val = int(num_total * val_split)

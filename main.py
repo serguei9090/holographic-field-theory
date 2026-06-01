@@ -38,12 +38,12 @@ from evaluate import evaluate_model, plot_and_save_results
 from generate import generate_text_topk, calculate_diversity
 
 # 4. Configurar Parámetros (Sync con Colab V4)
-DIMENSION     = 16384    # Dimensión de los fasores complejos (VSA escalada)
-CONTEXT_LEN   = 8        # Longitud de contexto (ventana)
+DIMENSION     = 768      # Dimensión de los fasores complejos (VSA escalada, igual a GPT-2)
+CONTEXT_LEN   = 64      # Longitud de contexto (ventana ampliada)
 EPOCHS        = 10       # Épocas de entrenamiento
 LEARNING_RATE = 0.01
-BATCH_SIZE    = 256     # Batch size optimizado para GPU
-NUM_STORIES   = 3000     # Cantidad de historias TinyStories
+BATCH_SIZE    = 256      # Batch size optimizado para GPU
+NUM_STORIES   = 5000     # Cantidad de historias TinyStories (escalado)
 TOPK          = 5        # Parámetro K para sampling de texto
 VAL_SPLIT     = 0.1      # 10% para validación
 

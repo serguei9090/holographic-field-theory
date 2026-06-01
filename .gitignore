@@ -11,3 +11,4 @@ wheels/
 .env
 *.tmp.*
 chft_checkpoint.pth
+best_chft_checkpoint.pth
