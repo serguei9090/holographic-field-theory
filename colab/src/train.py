@@ -123,7 +123,7 @@ def run_training_loop(
     if os.path.exists(checkpoint_path):
         print(f"  ⏳ Cargando punto de control de entrenamiento desde: {checkpoint_path}...")
         try:
-            checkpoint = torch.load(checkpoint_path, map_location=device)
+            checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
             # Cargar pesos
             codebook.load_state_dict(checkpoint['codebook_state_dict'])
             hopfield_mem.load_state_dict(checkpoint['hopfield_state_dict'])

@@ -6,13 +6,17 @@ Este documento sirve como referencia rápida para ver la evolución del modelo *
 
 | Versión del Modelo | Accuracy@1 | Perplexity (PPL) | Diversity Score | Contexto (Tokens) | Parámetros | Historias | Estado / Descripción |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **Official TinyStories GPT-2 (124M)** | **68.0% - 73.5%** | **1.10 - 1.15** | **8% - 12% (TTR)** | 1024 | 124M | Completo | Gold Standard en escala grande de TinyStories. |
-| **Official TinyStories 8-Layer** | **~80.0%** | **~2.40** | **Alto** | 512 | 28M | Completo | El "Sweet Spot" de los Transformers tradicionales. |
-| **Official TinyStories 2-Layer** | **60.0% - 65.0%** | **3.00 - 4.50** | **Medio** | 512 | ~15M | Completo | Primer matchup directo. Los Transformers de 2-capas tienen problemas de coherencia. |
-| **CHFT v2 (Original - Run de Época 10)** | **87.76%** | **1.87** | **72.8%** | 8 | 124M | 3,000 | Con fix de LayerNorm. *Nota: Accuracy inflada por data leakage de semilla.* |
+| **Official TinyStories 8-Layer** | **~80.0%** | **~2.40** | **Alto** | 512 | 28M | Completo | El "Sweet Spot" de los Transformers tradicionales en TinyStories. |
+| **Official TinyStories 2-Layer** | **60.0% - 65.0%** | **3.00 - 4.50** | **Medio** | 512 | ~33M | Completo | Transformer de 2 capas. Tiene problemas notables de coherencia a largo plazo. |
+| **Official TinyStories 1-Layer** | **18.0% - 25.0%** | **9.00 - 11.00** | **Bajo** | 512 | ~21M | Completo | Transformer de 1 capa. Genera gramática básica pero carece de estructura lógica. |
+| **Local Transformer 2-Layer** | *TBD* | *TBD* | *TBD* | 64 | ~12.5M | 5,000 | Baseline local de 2 capas con dim=512. Por entrenar. |
+| **Local Transformer 1-Layer** | **42.36%** | **15.35** | **33.1%** | 64 | 3.1M | 5,000 | Baseline local de 1 capa con dim=256. Bucles repetitivos. |
+| **CHFT v2 (Nano - This Run)** | **33.16%** | **30.04** | **81.9%** | 64 | 6.8M | 5,000 | Run actual con contexto 64. Supera al baseline de frecuencias pero inferior en Acc a Transf 1L. |
+| **CHFT v2 (Nano - Prev Run)** | **30.27%** | **37.95** | **77.2%** | 8 | 5.8M | 3,000 | Run anterior con contexto 8 y parada temprana en la época 8. |
 | **CHFT v3 (Learned Attn + Multi-Hop)** | **32.70%** | **33.58** | **47.6%** | 8 | ~62M | 3,000 | Versión anterior optimizada con Hopfield Multi-Hop. |
 | **CHFT v2 (Orthogonal + Decay)** | **24.62%** | **93.06** | **36.2%** | 8 | ~15M | 1,000 | Con binding posicional aleatorio y decaimiento exponencial fijo. |
-| **Baseline (Frecuencias)** | **6.55%** | **7,559.00** | **0.0%** | - | - | 3,000 | Estadístico básico: siempre predice el token más frecuente. |
+| **Baseline (Frecuencias)** | **5.94%** | **8,875.00** | **0.0%** | - | - | 5,000 | Estadístico básico: siempre predice el token más frecuente. |
+| **Future Reference (Wiki/Wikitext)**| *TBD* | *TBD* | *TBD* | 1024 | 124M | Wikipedia | GPT-2 (124M) reservado como benchmark para futuras fases con datasets genéricos. |
 
 ---
 

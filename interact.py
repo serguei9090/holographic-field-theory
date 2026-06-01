@@ -56,7 +56,7 @@ def main():
     # 5. Load and Initialize Model dynamically from checkpoint
     print(f"⏳ Loading weights from '{checkpoint_path}'...")
     try:
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
         
         # Detect parameters dynamically from the checkpoint
         DIMENSION = checkpoint['codebook_state_dict']['phases'].shape[1]

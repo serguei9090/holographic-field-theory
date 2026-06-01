@@ -93,6 +93,7 @@ def plot_and_save_results(
     filename: str = "chft_benchmark_results.png"
 ):
     peak_vram = torch.cuda.max_memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else 0.0
+    actual_epochs = len(loss_history)
     generate_png = os.getenv("GENERATE_BENCHMARK_PNG", "True").lower() == "true"
     if generate_png:
         print("\nGraficando resultados...")
@@ -100,7 +101,6 @@ def plot_and_save_results(
         fig.suptitle("CHFT v2 — Campos Holográficos de Fourier: Resultados", fontsize=14, fontweight='bold')
         gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.45, wspace=0.35)
 
-        actual_epochs = len(loss_history)
         epochs_ax = range(1, actual_epochs + 1)
 
         # ── Panel 1: Curva de pérdida ──
@@ -114,21 +114,23 @@ def plot_and_save_results(
         ax1.grid(True, alpha=0.3)
         ax1.set_xticks(list(epochs_ax))
 
-        # ── Panel 2: Comparativa Accuracy (3 barras) ──
+        # ── Panel 2: Comparativa Accuracy (4 barras) ──
         ax2 = fig.add_subplot(gs[1, 0])
+        labels = ["Baseline\n(freq)", "CHFT v2\n(nuestro)", "Transformer\n1-Layer", "Transformer\n2-Layer"]
+        values = [base_acc, accuracy, 42.36, 37.5]
         bars = ax2.bar(
-            ["Baseline\n(freq)", "CHFT v2\n(nuestro)", "LLM 124M\n(Transformer)"],
-            [base_acc, accuracy, 70.0],
-            color=["#94A3B8", "#7C3AED", "#10B981"],
+            labels,
+            values,
+            color=["#94A3B8", "#7C3AED", "#60A5FA", "#10B981"],
             width=0.5,
             edgecolor="white"
         )
-        for bar, val in zip(bars, [base_acc, accuracy, 70.0]):
+        for bar, val in zip(bars, values):
             ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.2,
                      f"{val:.1f}%", ha='center', va='bottom', fontweight='bold')
         ax2.set_title("Accuracy@1: Comparativa de Modelos")
         ax2.set_ylabel("Accuracy (%)")
-        ax2.set_ylim(0, max(accuracy, base_acc, 70.0) * 1.3)
+        ax2.set_ylim(0, max(accuracy, base_acc, 42.36, 37.5) * 1.3)
         ax2.grid(True, axis='y', alpha=0.3)
 
         # ── Panel 3: Métricas resumen ──
@@ -145,9 +147,11 @@ def plot_and_save_results(
             ["Train Loss final",    f"{loss_history[-1]:.4f}"],
             ["Val Loss final",      f"{val_loss_history[-1]:.4f}"],
             ["Accuracy@1",          f"{accuracy:.2f}%"],
-            ["Target LLM Acc",      "70.00%"],
+            ["Tgt Transf 1-L Acc",  "42.36%"],
+            ["Tgt Transf 2-L Acc",  "37.50%"],
             ["Perplexity",          f"{perplexity:.1f}"],
-            ["Target LLM PPL",      "1.12"],
+            ["Tgt Transf 1-L PPL",  "15.35"],
+            ["Tgt Transf 2-L PPL",  "7.0"],
             ["Diversity Score",     f"{unique_ratio:.1f}%"],
             ["Peak VRAM (GPU)",     f"{peak_vram:.1f} MB"],
         ]
@@ -158,7 +162,7 @@ def plot_and_save_results(
             cellLoc='center'
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(9)
+        table.set_fontsize(8)
         table.scale(1.2, 1.4)
         ax3.set_title("Resumen de Métricas", pad=12)
 
@@ -183,9 +187,11 @@ def plot_and_save_results(
     print(f"Val Loss Final     : {val_loss_history[-1]:.4f}")
     print(f"Accuracy@1 (CHFT)  : {accuracy:.2f}%")
     print(f"Accuracy@1 (Base)  : {base_acc:.2f}%")
-    print(f"Accuracy@1 (LLM)   : 70.00% (Brecha con LLM: -{70.0 - accuracy:.2f}pp)")
+    print(f"Acc (Transf 1-Layer): 42.36% (Brecha: {accuracy - 42.36:+.2f}pp)")
+    print(f"Acc (Transf 2-Layer): 37.50% (Brecha: {accuracy - 37.5:+.2f}pp)")
     print(f"Perplexity (CHFT)  : {perplexity:.2f}")
-    print(f"Perplexity (LLM)   : 1.12 (Brecha con LLM: +{perplexity - 1.12:.2f})")
+    print(f"PPL (Transf 1-Layer): 15.35 (Brecha: {perplexity - 15.35:+.2f})")
+    print(f"PPL (Transf 2-Layer): 7.00 (Brecha: {perplexity - 7.00:+.2f})")
     print(f"Diversity Score    : {unique_ratio:.1f}%")
     print(f"Peak VRAM (GPU)    : {peak_vram:.1f} MB")
     print("="*50 + "\n")

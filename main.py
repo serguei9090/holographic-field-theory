@@ -87,7 +87,7 @@ best_checkpoint_path = "best_chft_checkpoint.pth"
 if os.path.exists(best_checkpoint_path):
     print(f"\n🏆 Cargando el mejor punto de control encontrado: {best_checkpoint_path}")
     try:
-        checkpoint = torch.load(best_checkpoint_path, map_location=DEVICE)
+        checkpoint = torch.load(best_checkpoint_path, map_location=DEVICE, weights_only=True)
         codebook.load_state_dict(checkpoint['codebook_state_dict'])
         hopfield_mem.load_state_dict(checkpoint['hopfield_state_dict'])
         hopfield_mem.update_keys(codebook)
