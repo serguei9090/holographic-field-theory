@@ -49,6 +49,7 @@ class HolographicMLP(nn.Module):
 class FHRRPhasorEmbedding(nn.Module):
     """
     Fourier Holographic Reduced Representation con Multi-Head Gating y H-FFN.
+    v11: Spreading Activation Energy replaces flat pos_weights.
     """
 
     def __init__(
@@ -56,6 +57,7 @@ class FHRRPhasorEmbedding(nn.Module):
     ):
         super().__init__()
         self.embedding_dim = embedding_dim
+        self.context_len = context_len
         self.n_head = n_head
         assert embedding_dim % n_head == 0, (
             "embedding_dim debe ser divisible por n_head"
@@ -65,9 +67,6 @@ class FHRRPhasorEmbedding(nn.Module):
         self.phases = nn.Parameter(
             torch.empty(num_embeddings, embedding_dim).uniform_(-math.pi, math.pi)
         )
-
-        init_weights = torch.ones(context_len)
-        self.pos_weights = nn.Parameter(init_weights)
 
         g = torch.Generator().manual_seed(42)
         omega = torch.empty(embedding_dim).uniform_(-math.pi, math.pi, generator=g)
@@ -112,6 +111,24 @@ class FHRRPhasorEmbedding(nn.Module):
         # gate_sha: compuerta dual-path SHA vs multi-escala, inicializada a 0.5
         self.gate_sha = nn.Parameter(torch.tensor(0.5))
 
+        # ── Spreading Activation Energy Weights (v11) ──────────────────────────
+        # E(p) = w_d*alpha^d  +  w_r*S(r)  +  w_f*(1-exp(-k*freq))  +  w_rec*exp(-lam*d)
+        # d = distance from the query token (0 = newest position, C-1 = oldest)
+        # S(r) = relational strength supplied by the existing multi-head gate
+        # freq = normalised token-occurrence frequency (precomputed buffer, range [0,1])
+        self.sa_w_d = nn.Parameter(torch.tensor(0.25))  # depth-decay coefficient
+        self.sa_alpha = nn.Parameter(torch.tensor(0.85))  # decay base (init = 0.85)
+        self.sa_w_r = nn.Parameter(torch.tensor(0.25))  # relational-strength weight
+        self.sa_w_f = nn.Parameter(torch.tensor(0.25))  # frequency-reward weight
+        self.sa_k = nn.Parameter(torch.tensor(3.0))  # frequency saturation rate
+        self.sa_w_rec = nn.Parameter(torch.tensor(0.25))  # recency-bonus weight
+        self.sa_lam = nn.Parameter(torch.tensor(0.05))  # recency decay rate
+        # token frequency buffer — set by train.py; default: uniform
+        self.register_buffer(
+            "token_freq",
+            torch.zeros(num_embeddings),  # filled during dataset prep
+        )
+
     def forward(self, indices: torch.Tensor) -> torch.Tensor:
         phi = self.phases[indices]
         x_real = torch.cos(phi)
@@ -123,19 +140,42 @@ class FHRRPhasorEmbedding(nn.Module):
         bound_real = x_real * pos_rot_real - x_imag * pos_rot_imag
         bound_imag = x_real * pos_rot_imag + x_imag * pos_rot_real
 
-        # Multi-Head Gating
-        is_batched = len(indices.shape) == 2
-        if not is_batched:
-            W = self.pos_weights.view(-1, 1)
-        else:
-            W = self.pos_weights.view(1, -1, 1)
-
+        # ── Multi-Head Saliency Gate (S(r) component) ──────────────────────────
         gates = torch.sigmoid(self.gate_proj(phi))  # [..., C, n_head]
-        gates = gates.unsqueeze(-1).expand(*gates.shape, self.head_dim)
-        gates = gates.reshape(*phi.shape[:-1], self.embedding_dim)
+        # Mean gate per position → scalar relational strength S(r)  [..., C]
+        gate_strength = gates.mean(dim=-1)  # [..., C]
 
-        bound_real = bound_real * W * gates
-        bound_imag = bound_imag * W * gates
+        # ── Spreading Activation Energy (v11) ──────────────────────────────────
+        # d = distance from query: position C-1 is query (d=0), position 0 is oldest (d=C-1)
+        C = indices.shape[-1]  # context length
+        d = torch.arange(C, device=indices.device).float().flip(0)  # [C], newest=0
+
+        # Depth decay term: w_d * alpha^d
+        alpha_clamped = torch.clamp(torch.abs(self.sa_alpha), 0.5, 0.99)
+        decay_term = self.sa_w_d * (alpha_clamped**d)  # [C]
+
+        # Relational strength term: w_r * S(r)  (gate mean already in [0,1])
+        strength_term = self.sa_w_r * gate_strength  # [..., C]
+
+        # Frequency reward term: w_f * (1 - exp(-k * freq))
+        freq = self.token_freq[indices]  # [..., C]
+        k_pos = torch.clamp(self.sa_k, min=0.1)
+        freq_term = self.sa_w_f * (1.0 - torch.exp(-k_pos * freq))  # [..., C]
+
+        # Recency bonus term: w_rec * exp(-lambda * d)
+        lam_pos = torch.clamp(torch.abs(self.sa_lam), min=1e-4)
+        recency_term = self.sa_w_rec * torch.exp(-lam_pos * d)  # [C]
+
+        # Combined energy weight per position (all components positive)
+        W = decay_term + strength_term + freq_term + recency_term  # [..., C]
+        W = W.unsqueeze(-1)  # [..., C, 1] — broadcast over D
+
+        # Apply full gates (head expansion) and energy weights
+        gates_exp = gates.unsqueeze(-1).expand(*gates.shape, self.head_dim)
+        gates_exp = gates_exp.reshape(*phi.shape[:-1], self.embedding_dim)
+
+        bound_real = bound_real * W * gates_exp
+        bound_imag = bound_imag * W * gates_exp
 
         return torch.complex(bound_real, bound_imag)
 
@@ -192,20 +232,22 @@ class FHRRPhasorEmbedding(nn.Module):
             return out
 
         # 1. Split: query = last token, history = all prior tokens
-        q = ctx_hv[:, -1, :]   # [B, D] complex
+        q = ctx_hv[:, -1, :]  # [B, D] complex
         H = ctx_hv[:, :-1, :]  # [B, C-1, D] complex
 
         # 2. Phase cosine similarity: Re(<H_p, q>) / sqrt(D)
         #    = Re( H[B, C-1, D] * conj(q)[B, 1, D] ).sum(-1)
         #    This is the correct holographic inner product — computed over
         #    INDIVIDUAL token vectors, not the superposition bundle.
-        q_conj = torch.conj(q).unsqueeze(1)          # [B, 1, D]
+        q_conj = torch.conj(q).unsqueeze(1)  # [B, 1, D]
         scores = torch.real(torch.sum(H * q_conj, dim=-1)) / math.sqrt(D)  # [B, C-1]
 
         # 3. ALiBi-style recency bias: recent tokens get a bonus
         #    distances[0] = furthest token, distances[C-2] = most recent
         distances = torch.arange(C - 1, device=ctx_hv.device).flip(0).float()  # [C-1]
-        pos_bias = -torch.abs(self.sha_recency_lambda) * distances.unsqueeze(0)  # [1, C-1]
+        pos_bias = -torch.abs(self.sha_recency_lambda) * distances.unsqueeze(
+            0
+        )  # [1, C-1]
         scores = scores + pos_bias  # [B, C-1]
 
         # 4. Softmax temperature-scaled attention weights
@@ -233,7 +275,7 @@ class FHRRPhasorEmbedding(nn.Module):
         """
         gate = torch.sigmoid(self.gate_sha)  # scalar in (0, 1)
         psi_sha = self.sha_bundling(ctx_hv)
-        psi_ms  = self.bundle_multiscale(ctx_hv)
+        psi_ms = self.bundle_multiscale(ctx_hv)
         return gate * psi_sha + (1.0 - gate) * psi_ms
 
     def process_bundle(self, psi: torch.Tensor) -> torch.Tensor:
@@ -261,6 +303,11 @@ class ModernHopfieldMemory(nn.Module):
         super().__init__()
         self.beta = nn.Parameter(torch.tensor(beta))
         self.embedding_dim = embedding_dim
+        # ── Adaptive Beta (Memory Decay / v11) ─────────────────────────────────
+        # beta_eff = beta_base * sigmoid(beta_conf_scale * max_sim)
+        # When retrieval similarity is high (confident) → sharpen focus.
+        # When noisy (low similarity) → soften to avoid false attractors.
+        self.beta_conf_scale = nn.Parameter(torch.tensor(4.0))
 
         # Parámetros del CGRA (dimensión por dimensión, mapeo 4 entradas -> 2 salidas)
         # Entradas: [h.real, h.imag, x.real, x.imag]
@@ -332,13 +379,18 @@ class ModernHopfieldMemory(nn.Module):
         keys_all = codebook.all_keys()
 
         state = psi
-        # Refinamiento multi-hop por interferencia
+        # Refinamiento multi-hop con beta adaptativo (v11)
         for _ in range(steps):
             sim = torch.real(torch.matmul(state, torch.conj(keys_all).t())) / math.sqrt(
                 D
             )
 
-            weights = torch.softmax(sim * self.beta, dim=-1)
+            # Adaptive Beta: scale sharpness by retrieval confidence
+            # max_sim ∈ [0, 1] for unit phasors — high = confident match
+            max_sim = sim.max(dim=-1, keepdim=True).values  # [B, 1]
+            beta_eff = self.beta * torch.sigmoid(self.beta_conf_scale * max_sim)
+
+            weights = torch.softmax(sim * beta_eff, dim=-1)
             retrieved = torch.matmul(weights.to(keys_all.dtype), keys_all)
 
             # CGRA actualiza el estado recurrentemente en vez de sumarle directamente
@@ -355,3 +407,6 @@ class ModernHopfieldMemory(nn.Module):
         ) / math.sqrt(D)
 
         return logits
+
+    def update_keys(self, codebook: FHRRPhasorEmbedding):
+        pass

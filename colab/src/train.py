@@ -111,7 +111,24 @@ def run_training_loop(
     reset_checkpoint: bool = False,
     patience: int = 2,
 ):
-    print("\nIniciando Entrenamiento CHFT v5...")
+    print(
+        "\nIniciando Entrenamiento CHFT v11 (with Spreading Activation & Adaptive Beta)..."
+    )
+
+    # ── Compute and register token frequencies for Spreading Activation ──
+    print("      Calculando frecuencias de tokens para Spreading Activation...")
+    with torch.no_grad():
+        flat_ctx = train_ctx.view(-1)
+        counts = torch.bincount(
+            flat_ctx, minlength=codebook.token_freq.shape[0]
+        ).float()
+        max_count = counts.max()
+        if max_count > 0:
+            token_freqs = counts / max_count
+        else:
+            token_freqs = torch.zeros_like(counts)
+        codebook.token_freq.copy_(token_freqs)
+
     # Optimizar conjuntamente fases, pesos posicionales, MLP, proyecciones QK y beta
     optimizer = torch.optim.Adam(
         list(codebook.parameters()) + list(hopfield_mem.parameters()), lr=learning_rate
@@ -138,8 +155,10 @@ def run_training_loop(
             checkpoint = torch.load(
                 checkpoint_path, map_location=device, weights_only=True
             )
-            codebook.load_state_dict(checkpoint["codebook_state_dict"])
-            hopfield_mem.load_state_dict(checkpoint["hopfield_state_dict"])
+            codebook.load_state_dict(checkpoint["codebook_state_dict"], strict=False)
+            hopfield_mem.load_state_dict(
+                checkpoint["hopfield_state_dict"], strict=False
+            )
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
             scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
             start_epoch = checkpoint["epoch"] + 1

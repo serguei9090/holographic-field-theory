@@ -25,6 +25,8 @@ Below is a consolidated summary of all evaluated models, baseline standards, and
 | **CHFT v7.2 (HHC v2)** | Nested Chunking + Micro Unbinding | 19.52% | 130.01 | 45.4% | 4472.9 MB | 69.5m (5 ep) | **Failure** |
 | **CHFT v8 (CGRA)** | Complex Gated Recurrent Attractor (adds recurrency per coordinate) | 27.16% | 50.21 | 52.4% | 1124.6 MB | 252s (5 ep) | **Success** |
 | **CHFT v9 (SHA)** | Spectral Holographic Attention + Dual-Path gate vs multiscale | 26.67% | 51.99 | **53.1%** | 1220.6 MB | 317s (5 ep) | **Partial** |
+| **CHFT v10 (CSKA)** | Complex-Space Kernel Attention (ELU+1 kernel mapping) | 16.96% | 115.88 | 41.9% | 4005.1 MB | 700.3s (5 ep) | **Severe Failure** |
+| **CHFT v11 (SA + Beta)** | Spreading Activation Energy + Adaptive Beta scaling | 27.30% | 50.73 | 53.1% | 1221.0 MB | 763.6s (5 ep) | **Success** |
 | **Transformer 1L** | Causal Self-Attention Baseline (3.1M parameters) | 37.10% | 15.35 | 33.1% | 2573.6 MB | 43.9m (10 ep) | **Ref Target** |
 
 ---
@@ -66,7 +68,10 @@ Below is a consolidated summary of all evaluated models, baseline standards, and
 ### 8. Complex Gated Recurrent Attractor (CGRA / CHFT v8)
 * **Concept**: Replacing the simple additive residual updates in Hopfield attractor hops with a dimension-wise gated recurrent update (GRU-style adapted to complex representations).
 * **Why it worked**: Enabled coordinates to learn individual update, reset, and candidate phase projections, filtering high-dimensional VSA summation noise while maintaining low memory footprint and high generation diversity.
-* **Metric Boost**: Achieved a low perplexity of **50.21**, validation loss of **3.9161**, and increased generation diversity to **52.4%** while producing highly natural sentences.
+### 9. Spreading Activation Energy & Adaptive Beta (CHFT v11)
+* **Concept**: Replacing positional decay with a 4-component spreading activation weight equation (incorporating depth decay, relational gate strength, precomputed token frequency, and recency bonus) and scaling the Modern Hopfield Memory temperature ($\beta$) dynamically based on query retrieval confidence.
+* **Why it worked**: Filtered high-dimensional VSA cross-talk noise during summation, enabling the model to prioritise high-value context nodes. Scaling beta dynamically dynamically sharpens retrieval focus during confident matches while softening it for noisier contexts, preventing attraction to false local minima.
+* **Metric Boost**: Accuracy improved from **26.67%** (v9) to **27.30%** (+0.63pp), and perplexity dropped from **51.99** to **50.73** (-1.26), rescuing the network from the CSKA (v10) collapse.
 
 ---
 
@@ -94,7 +99,15 @@ Below is a consolidated summary of all evaluated models, baseline standards, and
   2. **Tensor Expansion Bottleneck**: Cleaning attractors jerárquicamente required expanding intermediate tensors to `[B, M, K, V]`, creating 90M elements per Hopfield step. This exploded VRAM usage to **4.4 GB** (a 400% increase) and slowed training by **18x** (69.5 min vs. 3.7 min).
 * **Impact**: Accuracy collapsed to **19.52%** and VRAM exploded.
 
+### 5. Complex-Space Kernel Attention (CSKA) (v10)
+* **Concept**: Replacing dual-path context bundling with kernel-based linear attention using feature mapping $\phi(x) = \text{ELU}(x) + 1.0$ and value projection mapped to an accumulated matrix $Z \in \mathbb{C}^{M \times D}$.
+* **Why it failed**:
+  1. **Loss of Holographic Superposition Fidelity**: Projecting complex phasors into a real-valued kernel projection space and computing $Z$ destroyed the precise phase-relations necessary for FHRR binding.
+  2. **VRAM and Compute Explosion**: Expanding to intermediate feature maps and accumulation tensors exploded Peak VRAM to **4.0 GB** (a 230% increase) and training time to **11.7 min** (a 120% increase) without any scaling advantages.
+* **Impact**: Accuracy plummeted to **16.96%** (down from 26.67%) and perplexity degraded to **115.88** (up from 51.99).
+
 ---
+
 
 ## 🔮 4. Future Test Candidates (Ideas to Try)
 
