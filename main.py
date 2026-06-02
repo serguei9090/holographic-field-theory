@@ -133,7 +133,7 @@ for prompt, length in test_prompts:
         max_new=length,
         k=TOPK,
         temperature=0.8,
-        refine_steps=1  # 1 paso de refinamiento de atractores
+        refine_steps=2  # 2 pasos de refinamiento de atractores (igual que en train)
     )
     print(f"  📝 Prompt : '{prompt}'")
     print(f"     Output : {result}\n")
@@ -150,7 +150,7 @@ unique_ratio = calculate_diversity(
     device=DEVICE,
     k=TOPK,
     temperature=0.8,
-    refine_steps=1
+    refine_steps=2
 )
 
 # 11. Mostrar y Graficar Resultados
