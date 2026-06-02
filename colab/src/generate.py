@@ -1,7 +1,6 @@
-import math
 import torch
-import torch.nn as nn
 from model import FHRRPhasorEmbedding, ModernHopfieldMemory
+
 
 def generate_text_topk(
     prompt: str,
@@ -15,7 +14,7 @@ def generate_text_topk(
     max_new: int = 20,
     k: int = 5,
     temperature: float = 0.8,
-    refine_steps: int = 2
+    refine_steps: int = 2,
 ) -> str:
     """
     Genera texto usando top-k sampling con temperatura para diversidad.
@@ -29,7 +28,6 @@ def generate_text_topk(
     gen_idx = [token_to_idx[t] for t in valid_tok]
 
     with torch.no_grad():
-        D = codebook.phases.shape[1]
         for _ in range(max_new):
             ctx = gen_idx[-context_len:]
             if len(ctx) < context_len:
@@ -38,20 +36,22 @@ def generate_text_topk(
             ctx_t = torch.tensor(ctx, device=device)
             # El binding y los pesos posicionales ya se aplican internamente en el codebook
             ctx_hv = codebook(ctx_t)
-            psi = codebook.bundle_multiscale(ctx_hv)
+            psi = codebook.dual_path_bundling(ctx_hv)
             psi = codebook.process_bundle(psi)
-            
+
             logits = hopfield_mem.refine_and_predict(psi, codebook, steps=refine_steps)
             logits = logits.clone()
-            
+
             # Penalizar tokens que ya están en el contexto para romper bucles repetitivos
             for tok_idx in set(ctx):
-                logits[tok_idx] -= 35.0  # Penalización proporcional a la escala de similitud (~64.0 máx)
+                logits[tok_idx] -= (
+                    35.0  # Penalización proporcional a la escala de similitud (~64.0 máx)
+                )
 
             # Top-k filtering
             if len(logits.shape) > 1:
-                logits = logits.squeeze(0) # In case of batched evaluation with B=1
-                
+                logits = logits.squeeze(0)  # In case of batched evaluation with B=1
+
             topk_vals, topk_ids = torch.topk(logits, k)
             scaled = topk_vals / temperature
             probs = torch.softmax(scaled, dim=0)
@@ -60,6 +60,7 @@ def generate_text_topk(
 
     raw_tokens = [idx_to_token[i] for i in gen_idx]
     return tokenizer.decode(raw_tokens)
+
 
 def calculate_diversity(
     prompts: list[tuple[str, int]],
@@ -72,15 +73,24 @@ def calculate_diversity(
     device: torch.device,
     k: int = 5,
     temperature: float = 0.8,
-    refine_steps: int = 2
+    refine_steps: int = 2,
 ) -> float:
     print("── Métrica de Diversidad ──")
     all_generated_tokens = []
     for prompt, length in prompts:
         generated_text = generate_text_topk(
-            prompt, codebook, hopfield_mem, tokenizer,
-            token_to_idx, idx_to_token, context_len, device,
-            max_new=50, k=k, temperature=temperature, refine_steps=refine_steps
+            prompt,
+            codebook,
+            hopfield_mem,
+            tokenizer,
+            token_to_idx,
+            idx_to_token,
+            context_len,
+            device,
+            max_new=50,
+            k=k,
+            temperature=temperature,
+            refine_steps=refine_steps,
         )
         raw = tokenizer.encode(generated_text, allowed_special="all")
         all_generated_tokens.extend(raw)

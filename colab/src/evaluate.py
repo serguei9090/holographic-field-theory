@@ -6,6 +6,7 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
+
 def evaluate_model(
     codebook: nn.Module,
     hopfield_mem: nn.Module,
@@ -14,7 +15,7 @@ def evaluate_model(
     batch_size: int,
     vocab_size: int,
     targets_tensor: torch.Tensor,
-    val_split: float
+    val_split: float,
 ):
     print("\nCalculando métricas de benchmark...")
     codebook.eval()
@@ -27,20 +28,22 @@ def evaluate_model(
 
     with torch.no_grad():
         beta_val = hopfield_mem.beta.item()
-        
+
         for b in range(math.ceil(num_val / batch_size)):
             ctx_v = val_ctx[b * batch_size : (b + 1) * batch_size]
             tgt_v = val_tgt[b * batch_size : (b + 1) * batch_size]
 
             ctx_hv = codebook(ctx_v)
-            psi_v = codebook.bundle_multiscale(ctx_hv)
+            psi_v = codebook.dual_path_bundling(ctx_hv)
             psi_v = codebook.process_bundle(psi_v)
-            
+
             logits_v = hopfield_mem.refine_and_predict(psi_v, codebook, steps=2)
 
             preds = torch.argmax(logits_v, dim=1)
             correct += (preds == tgt_v).sum().item()
-            total_ce += nn.functional.cross_entropy(logits_v * beta_val, tgt_v, reduction='sum').item()
+            total_ce += nn.functional.cross_entropy(
+                logits_v * beta_val, tgt_v, reduction="sum"
+            ).item()
             n_val += len(tgt_v)
 
     accuracy = correct / n_val * 100
@@ -49,16 +52,20 @@ def evaluate_model(
     print(f"  Accuracy@1  : {accuracy:.2f}%   (tokens exactos predichos)")
     print(f"  Perplexity  : {perplexity:.2f}  (menor = mejor; azar ≈ {vocab_size:,})")
 
-
     # Baseline
     token_freq = collections.Counter(targets_tensor.cpu().tolist())
     most_common = token_freq.most_common(1)[0][0]
     base_correct = sum(1 for t in val_tgt.cpu().tolist() if t == most_common)
     base_acc = base_correct / num_val * 100
-    print(f"\n  [Baseline freq] Accuracy@1: {base_acc:.2f}%  (siempre predice token más frecuente)")
-    print(f"  [CHFT v5]       Accuracy@1: {accuracy:.2f}%  (+{accuracy - base_acc:.2f}pp vs baseline)")
+    print(
+        f"\n  [Baseline freq] Accuracy@1: {base_acc:.2f}%  (siempre predice token más frecuente)"
+    )
+    print(
+        f"  [CHFT v5]       Accuracy@1: {accuracy:.2f}%  (+{accuracy - base_acc:.2f}pp vs baseline)"
+    )
 
     return accuracy, perplexity, base_acc
+
 
 def plot_and_save_results(
     epochs: int,
@@ -73,23 +80,44 @@ def plot_and_save_results(
     elapsed: float,
     unique_ratio: float,
     perplexity: float,
-    filename: str = "chft_benchmark_results.png"
+    filename: str = "chft_benchmark_results.png",
 ):
-    peak_vram = torch.cuda.max_memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else 0.0
+    peak_vram = (
+        torch.cuda.max_memory_allocated() / (1024**2)
+        if torch.cuda.is_available()
+        else 0.0
+    )
     actual_epochs = len(loss_history)
     generate_png = os.getenv("GENERATE_BENCHMARK_PNG", "True").lower() == "true"
     if generate_png:
         print("\nGraficando resultados...")
         fig = plt.figure(figsize=(14, 10))
-        fig.suptitle("CHFT v5 — Multi-Head & H-FFN: Resultados", fontsize=14, fontweight='bold')
+        fig.suptitle(
+            "CHFT v5 — Multi-Head & H-FFN: Resultados", fontsize=14, fontweight="bold"
+        )
         gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.45, wspace=0.35)
 
         epochs_ax = range(1, actual_epochs + 1)
 
         # ── Panel 1: Curva de pérdida ──
         ax1 = fig.add_subplot(gs[0, :])
-        ax1.plot(epochs_ax, loss_history, marker='o', color='#7C3AED', label='Train Loss', linewidth=2)
-        ax1.plot(epochs_ax, val_loss_history, marker='s', color='#EC4899', label='Val Loss', linewidth=2, linestyle='--')
+        ax1.plot(
+            epochs_ax,
+            loss_history,
+            marker="o",
+            color="#7C3AED",
+            label="Train Loss",
+            linewidth=2,
+        )
+        ax1.plot(
+            epochs_ax,
+            val_loss_history,
+            marker="s",
+            color="#EC4899",
+            label="Val Loss",
+            linewidth=2,
+            linestyle="--",
+        )
         ax1.set_title("Curva de Pérdida (Cross-Entropy)")
         ax1.set_xlabel("Época")
         ax1.set_ylabel("Loss")
@@ -99,71 +127,84 @@ def plot_and_save_results(
 
         # ── Panel 2: Comparativa Accuracy (4 barras) ──
         ax2 = fig.add_subplot(gs[1, 0])
-        labels = ["Baseline\n(freq)", "CHFT v5\n(nuestro)", "Transformer\n1-Layer", "Transformer\n2-Layer"]
+        labels = [
+            "Baseline\n(freq)",
+            "CHFT v5\n(nuestro)",
+            "Transformer\n1-Layer",
+            "Transformer\n2-Layer",
+        ]
         values = [base_acc, accuracy, 37.10, 37.5]
         bars = ax2.bar(
             labels,
             values,
             color=["#94A3B8", "#7C3AED", "#60A5FA", "#10B981"],
             width=0.5,
-            edgecolor="white"
+            edgecolor="white",
         )
         for bar, val in zip(bars, values):
-            ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.2,
-                     f"{val:.1f}%", ha='center', va='bottom', fontweight='bold')
+            ax2.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.2,
+                f"{val:.1f}%",
+                ha="center",
+                va="bottom",
+                fontweight="bold",
+            )
         ax2.set_title("Accuracy@1: Comparativa de Modelos")
         ax2.set_ylabel("Accuracy (%)")
         ax2.set_ylim(0, max(accuracy, base_acc, 42.36, 37.5) * 1.3)
-        ax2.grid(True, axis='y', alpha=0.3)
+        ax2.grid(True, axis="y", alpha=0.3)
 
         # ── Panel 3: Métricas resumen ──
         ax3 = fig.add_subplot(gs[1, 1])
-        ax3.axis('off')
+        ax3.axis("off")
         summary_rows = [
-            ["Parámetro",           "Valor"],
-            ["Dimensión FHRR",      f"{dimension:,}"],
-            ["Vocabulario",         f"{vocab_size:,} tokens"],
-            ["Historias usadas",    f"{num_stories:,}"],
-            ["Muestras train",      f"{num_train:,}"],
-            ["Épocas",              f"{actual_epochs} / {epochs}"],
-            ["Tiempo total",        f"{elapsed:.0f}s"],
-            ["Train Loss final",    f"{loss_history[-1]:.4f}"],
-            ["Val Loss final",      f"{val_loss_history[-1]:.4f}"],
-            ["Accuracy@1",          f"{accuracy:.2f}%"],
-            ["Tgt Transf 1-L Acc",  "37.10%"],
-            ["Perplexity",          f"{perplexity:.1f}"],
-            ["Tgt Transf 1-L PPL",  "23.27"],
-            ["Diversity Score",     f"{unique_ratio:.1f}%"],
-            ["Peak VRAM (GPU)",     f"{peak_vram:.1f} MB"],
+            ["Parámetro", "Valor"],
+            ["Dimensión FHRR", f"{dimension:,}"],
+            ["Vocabulario", f"{vocab_size:,} tokens"],
+            ["Historias usadas", f"{num_stories:,}"],
+            ["Muestras train", f"{num_train:,}"],
+            ["Épocas", f"{actual_epochs} / {epochs}"],
+            ["Tiempo total", f"{elapsed:.0f}s"],
+            ["Train Loss final", f"{loss_history[-1]:.4f}"],
+            ["Val Loss final", f"{val_loss_history[-1]:.4f}"],
+            ["Accuracy@1", f"{accuracy:.2f}%"],
+            ["Tgt Transf 1-L Acc", "37.10%"],
+            ["Perplexity", f"{perplexity:.1f}"],
+            ["Tgt Transf 1-L PPL", "23.27"],
+            ["Diversity Score", f"{unique_ratio:.1f}%"],
+            ["Peak VRAM (GPU)", f"{peak_vram:.1f} MB"],
         ]
         table = ax3.table(
             cellText=summary_rows[1:],
             colLabels=summary_rows[0],
-            loc='center',
-            cellLoc='center'
+            loc="center",
+            cellLoc="center",
         )
         table.auto_set_font_size(False)
         table.set_fontsize(8)
         table.scale(1.2, 1.4)
         ax3.set_title("Resumen de Métricas", pad=12)
 
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.savefig(filename, dpi=300, bbox_inches="tight")
         print(f"✅ Gráfico guardado como '{filename}'.")
         plt.show()
         print("✅ Figura mostrada en pantalla.")
     else:
-        print("\nℹ️ Salteando la generación del gráfico PNG por configuración GENERATE_BENCHMARK_PNG=False en .env")
-    
+        print(
+            "\nℹ️ Salteando la generación del gráfico PNG por configuración GENERATE_BENCHMARK_PNG=False en .env"
+        )
+
     # Imprimir un resumen en texto fácil de copiar y pegar
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("📊 RESUMEN DE MÉTRICAS (CHFT v5 Benchmark)")
-    print("="*50)
+    print("=" * 50)
     print(f"Dimensión FHRR     : {dimension:,}")
     print(f"Vocabulario        : {vocab_size:,} tokens")
     print(f"Historias Usadas   : {num_stories:,}")
     print(f"Muestras de Train  : {num_train:,}")
     print(f"Épocas             : {actual_epochs} / {epochs}")
-    print(f"Tiempo Total       : {elapsed:.1f}s ({elapsed/60:.1f} min)")
+    print(f"Tiempo Total       : {elapsed:.1f}s ({elapsed / 60:.1f} min)")
     print(f"Train Loss Final   : {loss_history[-1]:.4f}")
     print(f"Val Loss Final     : {val_loss_history[-1]:.4f}")
     print(f"Accuracy@1 (CHFT)  : {accuracy:.2f}%")
@@ -173,4 +214,4 @@ def plot_and_save_results(
     print(f"PPL (Transf 1-Layer): 23.27 (Brecha: {perplexity - 23.27:+.2f})")
     print(f"Diversity Score    : {unique_ratio:.1f}%")
     print(f"Peak VRAM (GPU)    : {peak_vram:.1f} MB")
-    print("="*50 + "\n")
+    print("=" * 50 + "\n")

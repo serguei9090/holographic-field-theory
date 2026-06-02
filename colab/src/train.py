@@ -175,8 +175,8 @@ def run_training_loop(
             # 1. Holographic Binding with Multi-Head Gates
             ctx_hv = codebook(ctx_b)  # [B, C, D]
 
-            # 2. Multi-Scale Bundling
-            psi = codebook.bundle_multiscale(ctx_hv)  # [B, D]
+            # 2. SHA Dual-Path Bundling (Spectral Holographic Attention + Multi-Scale)
+            psi = codebook.dual_path_bundling(ctx_hv)  # [B, D]
 
             # 3. Holographic FFN (Complex Non-Linear + Transform)
             psi = codebook.process_bundle(psi)  # [B, D]
@@ -211,7 +211,7 @@ def run_training_loop(
                 tgt_v = val_tgt[b * batch_size : (b + 1) * batch_size]
 
                 ctx_hv = codebook(ctx_v)
-                psi_v = codebook.bundle_multiscale(ctx_hv)
+                psi_v = codebook.dual_path_bundling(ctx_hv)
                 psi_v = codebook.process_bundle(psi_v)
 
                 logits_v = hopfield_mem.refine_and_predict(psi_v, codebook, steps=2)

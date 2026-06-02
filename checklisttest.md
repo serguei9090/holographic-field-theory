@@ -24,6 +24,7 @@ Below is a consolidated summary of all evaluated models, baseline standards, and
 | **CHFT v7.1 (HHC v1)** | Hierarchical Holographic Chunking (Dirty) | 22.96% | 81.83 | 43.5% | 1252.9 MB | 10.6m (5 ep) | **Failure** |
 | **CHFT v7.2 (HHC v2)** | Nested Chunking + Micro Unbinding | 19.52% | 130.01 | 45.4% | 4472.9 MB | 69.5m (5 ep) | **Failure** |
 | **CHFT v8 (CGRA)** | Complex Gated Recurrent Attractor (adds recurrency per coordinate) | 27.16% | 50.21 | 52.4% | 1124.6 MB | 252s (5 ep) | **Success** |
+| **CHFT v9 (SHA)** | Spectral Holographic Attention + Dual-Path gate vs multiscale | 26.67% | 51.99 | **53.1%** | 1220.6 MB | 317s (5 ep) | **Partial** |
 | **Transformer 1L** | Causal Self-Attention Baseline (3.1M parameters) | 37.10% | 15.35 | 33.1% | 2573.6 MB | 43.9m (10 ep) | **Ref Target** |
 
 ---
@@ -98,5 +99,7 @@ Below is a consolidated summary of all evaluated models, baseline standards, and
 ## 🔮 4. Future Test Candidates (Ideas to Try)
 
 - [x] **Complex Gated Recurrent Attractor (CGRA)**: Inserting a light recurrent phase transition gate between Hopfield hops to update the query dynamically without exploding VRAM. *(Implemented in CHFT v8)*
+- [x] **SHA + Dual-Path**: Correct holographic attention on individual token phasors + gated blend with multiscale. PPL 51.99, Acc 26.67% — no collapse, high diversity, but didn’t beat v6. Gate blending likely diluted SHA’s advantage. *(Implemented in CHFT v9)*
+- [ ] **SHA on Content-Only Phasors (v9.1)**: Compute attention scores using RAW phase vectors (before positional binding) for clean semantic similarity. Use position-bound H for weighted sum. Separates “What to attend to” (content) from “what to retrieve” (positional context).
 - [ ] **Dual-Path Phase Space**: Combining a fast pure-phase direct mapping (CHFT v6 Plano) and a slow low-rank complex projection path in parallel.
 - [ ] **Dynamic Temperature Scaling**: Modifying $\beta$ dynamically per token during Hopfield retrieval based on context entropy.

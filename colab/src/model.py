@@ -66,7 +66,7 @@ class FHRRPhasorEmbedding(nn.Module):
             torch.empty(num_embeddings, embedding_dim).uniform_(-math.pi, math.pi)
         )
 
-        init_weights = 0.85 ** torch.arange(context_len).flip(0)
+        init_weights = torch.ones(context_len)
         self.pos_weights = nn.Parameter(init_weights)
 
         g = torch.Generator().manual_seed(42)
@@ -101,6 +101,16 @@ class FHRRPhasorEmbedding(nn.Module):
         V_real = torch.empty(embedding_dim, rank).normal_(mean=0.0, std=std)
         V_imag = torch.empty(embedding_dim, rank).normal_(mean=0.0, std=std)
         self.complex_V = nn.Parameter(torch.complex(V_real, V_imag))
+
+        # Parámetros SHA (Spectral Holographic Attention) — v9
+        # beta_sha: temperatura de softmax para la atención espectral
+        self.sha_beta = nn.Parameter(torch.tensor(8.0))
+        # alpha_sha: escala del vector atendido al fusionar con query
+        self.sha_alpha = nn.Parameter(torch.tensor(1.0))
+        # recency_lambda: decaimiento ALiBi-style sobre distancias posicionales
+        self.sha_recency_lambda = nn.Parameter(torch.tensor(0.05))
+        # gate_sha: compuerta dual-path SHA vs multi-escala, inicializada a 0.5
+        self.gate_sha = nn.Parameter(torch.tensor(0.5))
 
     def forward(self, indices: torch.Tensor) -> torch.Tensor:
         phi = self.phases[indices]
@@ -153,6 +163,78 @@ class FHRRPhasorEmbedding(nn.Module):
         psi_long = torch.sum(long_part, dim=dim_reduce)
 
         return self.scale_short * psi_short + self.scale_long * psi_long
+
+    def sha_bundling(self, ctx_hv: torch.Tensor) -> torch.Tensor:
+        """
+        SHA — Spectral Holographic Attention (CHFT v9).
+
+        Computes attention DIRECTLY over individual token hypervectors H[B, C-1, D]
+        using their native phase cosine similarity with the query q[B, D].
+
+        This avoids the cross-talk problem of HPRA, which incorrectly computed
+        attention using the lossy superposition bundle as key, injecting O(C*sqrt(D))
+        noise from all tokens into every attention score.
+
+        ctx_hv : [B, C, D] complex  (batched)  OR  [C, D] complex  (single)
+        returns : [B, D] complex  (bundled context vector)
+        """
+        is_batched = len(ctx_hv.shape) == 3
+        if not is_batched:
+            ctx_hv = ctx_hv.unsqueeze(0)  # → [1, C, D]
+
+        B, C, D = ctx_hv.shape
+
+        # Edge case: only one token in context
+        if C <= 1:
+            out = ctx_hv[:, -1, :]
+            if not is_batched:
+                out = out.squeeze(0)
+            return out
+
+        # 1. Split: query = last token, history = all prior tokens
+        q = ctx_hv[:, -1, :]   # [B, D] complex
+        H = ctx_hv[:, :-1, :]  # [B, C-1, D] complex
+
+        # 2. Phase cosine similarity: Re(<H_p, q>) / sqrt(D)
+        #    = Re( H[B, C-1, D] * conj(q)[B, 1, D] ).sum(-1)
+        #    This is the correct holographic inner product — computed over
+        #    INDIVIDUAL token vectors, not the superposition bundle.
+        q_conj = torch.conj(q).unsqueeze(1)          # [B, 1, D]
+        scores = torch.real(torch.sum(H * q_conj, dim=-1)) / math.sqrt(D)  # [B, C-1]
+
+        # 3. ALiBi-style recency bias: recent tokens get a bonus
+        #    distances[0] = furthest token, distances[C-2] = most recent
+        distances = torch.arange(C - 1, device=ctx_hv.device).flip(0).float()  # [C-1]
+        pos_bias = -torch.abs(self.sha_recency_lambda) * distances.unsqueeze(0)  # [1, C-1]
+        scores = scores + pos_bias  # [B, C-1]
+
+        # 4. Softmax temperature-scaled attention weights
+        attn_weights = torch.softmax(scores * self.sha_beta, dim=-1)  # [B, C-1]
+
+        # 5. Weighted holographic superposition (no unbinding needed — clean signal)
+        psi_attended = torch.sum(attn_weights.unsqueeze(-1) * H, dim=1)  # [B, D]
+
+        # 6. Residual fusion with query
+        psi_final = q + self.sha_alpha * psi_attended  # [B, D]
+
+        if not is_batched:
+            psi_final = psi_final.squeeze(0)
+        return psi_final
+
+    def dual_path_bundling(self, ctx_hv: torch.Tensor) -> torch.Tensor:
+        """
+        Dual-Path Bundling: fuses SHA (spectral attention) with the proven
+        multi-scale temporal bundling via a learnable gate.
+
+        - gate_sha → 1.0: pure SHA (full attention)
+        - gate_sha → 0.0: pure multi-scale (champion v6 behaviour)
+
+        The gate learns the optimal blend during training.
+        """
+        gate = torch.sigmoid(self.gate_sha)  # scalar in (0, 1)
+        psi_sha = self.sha_bundling(ctx_hv)
+        psi_ms  = self.bundle_multiscale(ctx_hv)
+        return gate * psi_sha + (1.0 - gate) * psi_ms
 
     def process_bundle(self, psi: torch.Tensor) -> torch.Tensor:
         """
