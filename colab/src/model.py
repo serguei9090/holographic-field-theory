@@ -46,6 +46,34 @@ class HolographicMLP(nn.Module):
         return torch.complex(r, i)
 
 
+class UnitaryHouseholderProjection(nn.Module):
+    """
+    Capas de proyección complejas estrictamente unitarias mediante Householder reflections.
+    Conserva magnitudes y ángulos de fase, eliminando distorsiones.
+    """
+
+    def __init__(self, dim: int, K: int = 8):
+        super().__init__()
+        self.dim = dim
+        self.K = K
+        self.v_real = nn.Parameter(torch.empty(K, dim).normal_(mean=0.0, std=0.02))
+        self.v_imag = nn.Parameter(torch.empty(K, dim).normal_(mean=0.0, std=0.02))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [..., D] complex
+        orig_shape = x.shape
+        x_flat = x.view(-1, self.dim)
+
+        v = torch.complex(self.v_real, self.v_imag)
+        for k in range(self.K):
+            vk = v[k]
+            sq_norm = torch.sum(torch.abs(vk) ** 2) + 1e-8
+            proj = torch.sum(x_flat * torch.conj(vk), dim=-1, keepdim=True)
+            x_flat = x_flat - 2.0 * proj * vk / sq_norm
+
+        return x_flat.view(orig_shape)
+
+
 class FHRRPhasorEmbedding(nn.Module):
     """
     Fourier Holographic Reduced Representation con Multi-Head Gating y H-FFN.
@@ -90,16 +118,8 @@ class FHRRPhasorEmbedding(nn.Module):
         # H-FFN
         self.mlp = HolographicMLP(embedding_dim, expansion_factor=2)
 
-        # Proyección lineal compleja asimétrica Q (Path 3 evolucionado a QKV)
-        rank = 128  # Aumentamos el rango de transformación
-        std = 1.0 / math.sqrt(embedding_dim)
-        U_real = torch.empty(rank, embedding_dim).normal_(mean=0.0, std=std)
-        U_imag = torch.empty(rank, embedding_dim).normal_(mean=0.0, std=std)
-        self.complex_U_conj = nn.Parameter(torch.complex(U_real, U_imag))
-
-        V_real = torch.empty(embedding_dim, rank).normal_(mean=0.0, std=std)
-        V_imag = torch.empty(embedding_dim, rank).normal_(mean=0.0, std=std)
-        self.complex_V = nn.Parameter(torch.complex(V_real, V_imag))
+        # Proyección complex unitaria Q (Householder - v15)
+        self.q_proj = UnitaryHouseholderProjection(embedding_dim, K=8)
 
         # Parámetros SHA (Spectral Holographic Attention) — v9
         # beta_sha: temperatura de softmax para la atención espectral
@@ -282,10 +302,8 @@ class FHRRPhasorEmbedding(nn.Module):
         """
         Bloque Transformer Equivalente para el Vector Holográfico (H-FFN + Atención Lineal).
         """
-        # 1. Proyección lineal compleja (Q-Transformation)
-        temp = torch.matmul(psi, self.complex_V)
-        proj = torch.matmul(temp, self.complex_U_conj)
-        psi = psi + proj
+        # 1. Proyección complex unitaria Q (Householder)
+        psi = self.q_proj(psi)
 
         # 2. H-FFN block with LayerNorm (Pre-LN style) - SOFT RESIDUAL
         psi_norm = self.ln_1(psi)
@@ -333,14 +351,8 @@ class ModernHopfieldMemory(nn.Module):
         )
         self.b_c = nn.Parameter(torch.zeros(self.n_head, self.head_dim, 2))
 
-        # Proyección lineal de mezcla compleja entre cabezas (inter-head mixing)
-        mix_std = 1.0 / math.sqrt(embedding_dim)
-        self.W_mix_real = nn.Parameter(
-            torch.empty(embedding_dim, embedding_dim).normal_(mean=0.0, std=mix_std)
-        )
-        self.W_mix_imag = nn.Parameter(
-            torch.empty(embedding_dim, embedding_dim).normal_(mean=0.0, std=mix_std)
-        )
+        # Proyección complex unitaria para mezcla de cabezas (Householder)
+        self.mix_proj = UnitaryHouseholderProjection(embedding_dim, K=8)
 
     def cgra_update(self, h: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         # h: [B, D] complex o [D] complex
@@ -421,14 +433,8 @@ class ModernHopfieldMemory(nn.Module):
             # CGRA actualiza el estado recurrentemente en cada subespacio de cabeza
             state = self.cgra_update(state, retrieved)
 
-            # Proyección lineal de mezcla compleja inter-head
-            mix_real = torch.matmul(state.real, self.W_mix_real) - torch.matmul(
-                state.imag, self.W_mix_imag
-            )
-            mix_imag = torch.matmul(state.real, self.W_mix_imag) + torch.matmul(
-                state.imag, self.W_mix_real
-            )
-            state = state + torch.complex(mix_real, mix_imag)
+            # Proyección complex unitaria para mezcla de cabezas (Householder)
+            state = self.mix_proj(state)
 
             state = codebook.ln_2(state) / math.sqrt(D)
 

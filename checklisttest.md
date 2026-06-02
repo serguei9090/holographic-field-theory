@@ -31,7 +31,8 @@ Below is a consolidated summary of all evaluated models, baseline standards, and
 | **CHFT v13 (Space Fold)** | Hyperdimensional FFN Projection to 3072 dims (Ctx=64) | 24.31% | 63.13 | 50.9% | 1798.1 MB | 396.0s (5 ep) | **Partial** |
 | **CHFT v13 (Ctx=128)** | Space-Folding with context scaled to 128 | 24.87% | 61.87 | 48.7% | 2773.5 MB | 536.0s (5 ep) | **Partial** |
 | **CHFT v14 (MH-CGRA)** | 8-head Subspace Attractor CGRA + mix (Ctx=128) | 27.07% | 50.49 | 56.1% | 2214.8 MB | 455.2s (5 ep) | **Success** |
-| **CHFT v14 (MH-CGRA Ctx=64)** | 8-head Subspace Attractor CGRA + mix (Ctx=64) | **27.96%** | **48.67** | **56.5%** | **1240.9 MB** | **319.4s (5 ep)** | **NEW CHAMPION** 🏆 |
+| **CHFT v14 (MH-CGRA Ctx=64)** | 8-head Subspace Attractor CGRA + mix (Ctx=64) | 27.96% | 48.67 | 56.5% | 1240.9 MB | 319.4s (5 ep) | **Success** |
+| **CHFT v15 (UHP)** | strictly unitary Householder Projections (K=8, Ctx=64) | **28.44%** | **49.01** | **60.5%** | **1214.3 MB** | **372.0s (5 ep)** | **NEW CHAMPION** 🏆 |
 | **Transformer 1L** | Causal Self-Attention Baseline (3.1M parameters) | 37.10% | 15.35 | 33.1% | 2573.6 MB | 43.9m (10 ep) | **Ref Target** |
 
 ---
@@ -84,6 +85,11 @@ Below is a consolidated summary of all evaluated models, baseline standards, and
 * **Metric Boost**:
   * At **Ctx=128**, achieved **27.07% Accuracy** and a lower perplexity of **50.49** (vs. 50.73 in v11 at Ctx=64), outperforming the space-folding projection models while using 550 MB less VRAM.
   * At **Ctx=64**, achieved a record low perplexity of **48.67** (beating the champion v6's 48.69) and **27.96% Accuracy** (bridging the accuracy gap to just 0.21pp), while accelerating training time to **5.3 minutes** due to `torch.einsum` optimizations.
+
+### 11. Unitary Householder Projections (UHP / CHFT v15)
+* **Concept**: Replacing non-unitary projections (in both the Q-projection head and inter-head mixing) with sequences of $K=8$ strictly unitary complex Householder reflections.
+* **Why it worked**: Guaranteed mathematically lossless rotations in complex phase space. By eliminating phase angle distortion and magnitude degradation during projections, it preserved FHRR coordinate coherence, allowing the Hopfield attractor dynamics to cleanly classification target tokens.
+* **Metric Boost**: Achieved a new **undisputed record Accuracy@1 of 28.44%** (outperforming champion v6's 28.17%) and a low perplexity of **49.01**, while using the least VRAM (1214.3 MB) and training parameters (13.6M) among advanced variants.
 
 ---
 
