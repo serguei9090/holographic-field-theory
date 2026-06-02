@@ -309,24 +309,38 @@ class ModernHopfieldMemory(nn.Module):
         # When noisy (low similarity) → soften to avoid false attractors.
         self.beta_conf_scale = nn.Parameter(torch.tensor(4.0))
 
-        # Parámetros del CGRA (dimensión por dimensión, mapeo 4 entradas -> 2 salidas)
-        # Entradas: [h.real, h.imag, x.real, x.imag]
-        # Salidas: [real, imag] para compuertas y candidato
+        # Configuración Multi-Head Subspace
+        self.n_head = 8
+        self.head_dim = embedding_dim // self.n_head
+        assert embedding_dim % self.n_head == 0, (
+            "embedding_dim debe ser divisible por n_head"
+        )
+
+        # Parámetros del CGRA por subespacio/cabeza (n_head, head_dim, 4, 2)
         std = 1.0 / math.sqrt(4)
         self.W_z = nn.Parameter(
-            torch.empty(embedding_dim, 4, 2).normal_(mean=0.0, std=std)
+            torch.empty(self.n_head, self.head_dim, 4, 2).normal_(mean=0.0, std=std)
         )
-        self.b_z = nn.Parameter(torch.zeros(embedding_dim, 2))
+        self.b_z = nn.Parameter(torch.zeros(self.n_head, self.head_dim, 2))
 
         self.W_r = nn.Parameter(
-            torch.empty(embedding_dim, 4, 2).normal_(mean=0.0, std=std)
+            torch.empty(self.n_head, self.head_dim, 4, 2).normal_(mean=0.0, std=std)
         )
-        self.b_r = nn.Parameter(torch.zeros(embedding_dim, 2))
+        self.b_r = nn.Parameter(torch.zeros(self.n_head, self.head_dim, 2))
 
         self.W_c = nn.Parameter(
-            torch.empty(embedding_dim, 4, 2).normal_(mean=0.0, std=std)
+            torch.empty(self.n_head, self.head_dim, 4, 2).normal_(mean=0.0, std=std)
         )
-        self.b_c = nn.Parameter(torch.zeros(embedding_dim, 2))
+        self.b_c = nn.Parameter(torch.zeros(self.n_head, self.head_dim, 2))
+
+        # Proyección lineal de mezcla compleja entre cabezas (inter-head mixing)
+        mix_std = 1.0 / math.sqrt(embedding_dim)
+        self.W_mix_real = nn.Parameter(
+            torch.empty(embedding_dim, embedding_dim).normal_(mean=0.0, std=mix_std)
+        )
+        self.W_mix_imag = nn.Parameter(
+            torch.empty(embedding_dim, embedding_dim).normal_(mean=0.0, std=mix_std)
+        )
 
     def cgra_update(self, h: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         # h: [B, D] complex o [D] complex
@@ -336,34 +350,45 @@ class ModernHopfieldMemory(nn.Module):
             h = h.unsqueeze(0)
             x = x.unsqueeze(0)
 
-        # 1. Apilar partes reales e imaginarias
+        B = h.shape[0]
+
+        # 1. Redimensionar a cabezas: [B, n_head, head_dim]
+        h_heads = h.view(B, self.n_head, self.head_dim)
+        x_heads = x.view(B, self.n_head, self.head_dim)
+
+        # 2. Apilar partes reales e imaginarias: [B, n_head, head_dim, 4]
         stacked_inputs = torch.stack(
-            [h.real, h.imag, x.real, x.imag], dim=-1
-        )  # [B, D, 4]
+            [h_heads.real, h_heads.imag, x_heads.real, x_heads.imag], dim=-1
+        )
 
-        # 2. Computar compuertas de actualización (z) y reset (r)
+        # 3. Computar compuertas de actualización (z) y reset (r) en paralelo
         z = torch.sigmoid(
-            torch.einsum("bdf,dfg->bdg", stacked_inputs, self.W_z) + self.b_z
-        )  # [B, D, 2]
+            torch.einsum("bndf,ndfg->bndg", stacked_inputs, self.W_z) + self.b_z
+        )  # [B, n_head, head_dim, 2]
         r = torch.sigmoid(
-            torch.einsum("bdf,dfg->bdg", stacked_inputs, self.W_r) + self.b_r
-        )  # [B, D, 2]
+            torch.einsum("bndf,ndfg->bndg", stacked_inputs, self.W_r) + self.b_r
+        )  # [B, n_head, head_dim, 2]
 
-        # 3. Aplicar compuerta de reset al estado anterior
-        h_reset_real = r[..., 0] * h.real
-        h_reset_imag = r[..., 1] * h.imag
+        # 4. Aplicar compuerta de reset al estado anterior de cada cabeza
+        h_reset_real = r[..., 0] * h_heads.real
+        h_reset_imag = r[..., 1] * h_heads.imag
 
-        # 4. Computar estado candidato (tilde_h)
-        I_c = torch.stack([h_reset_real, h_reset_imag, x.real, x.imag], dim=-1)
+        # 5. Computar estado candidato (tilde_h)
+        I_c = torch.stack(
+            [h_reset_real, h_reset_imag, x_heads.real, x_heads.imag], dim=-1
+        )
         h_tilde = torch.tanh(
-            torch.einsum("bdf,dfg->bdg", I_c, self.W_c) + self.b_c
-        )  # [B, D, 2]
+            torch.einsum("bndf,ndfg->bndg", I_c, self.W_c) + self.b_c
+        )  # [B, n_head, head_dim, 2]
 
-        # 5. Actualización recurrente compuerta por compuerta
-        h_new_real = (1.0 - z[..., 0]) * h.real + z[..., 0] * h_tilde[..., 0]
-        h_new_imag = (1.0 - z[..., 1]) * h.imag + z[..., 1] * h_tilde[..., 1]
+        # 6. Actualización recurrente compuerta por compuerta
+        h_new_real = (1.0 - z[..., 0]) * h_heads.real + z[..., 0] * h_tilde[..., 0]
+        h_new_imag = (1.0 - z[..., 1]) * h_heads.imag + z[..., 1] * h_tilde[..., 1]
 
-        out = torch.complex(h_new_real, h_new_imag)
+        # 7. Reconstruir a tensor plano [B, D]
+        out_heads = torch.complex(h_new_real, h_new_imag)
+        out = out_heads.view(B, self.embedding_dim)
+
         if is_1d:
             out = out.squeeze(0)
         return out
@@ -379,7 +404,7 @@ class ModernHopfieldMemory(nn.Module):
         keys_all = codebook.all_keys()
 
         state = psi
-        # Refinamiento multi-hop con beta adaptativo (v11)
+        # Refinamiento multi-hop con beta adaptativo (v11) y mezcla de cabezas (v14)
         for _ in range(steps):
             sim = torch.real(torch.matmul(state, torch.conj(keys_all).t())) / math.sqrt(
                 D
@@ -393,8 +418,18 @@ class ModernHopfieldMemory(nn.Module):
             weights = torch.softmax(sim * beta_eff, dim=-1)
             retrieved = torch.matmul(weights.to(keys_all.dtype), keys_all)
 
-            # CGRA actualiza el estado recurrentemente en vez de sumarle directamente
+            # CGRA actualiza el estado recurrentemente en cada subespacio de cabeza
             state = self.cgra_update(state, retrieved)
+
+            # Proyección lineal de mezcla compleja inter-head
+            mix_real = torch.matmul(state.real, self.W_mix_real) - torch.matmul(
+                state.imag, self.W_mix_imag
+            )
+            mix_imag = torch.matmul(state.real, self.W_mix_imag) + torch.matmul(
+                state.imag, self.W_mix_real
+            )
+            state = state + torch.complex(mix_real, mix_imag)
+
             state = codebook.ln_2(state) / math.sqrt(D)
 
         # Logits finales usando fases nativas puras

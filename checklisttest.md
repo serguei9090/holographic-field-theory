@@ -27,6 +27,11 @@ Below is a consolidated summary of all evaluated models, baseline standards, and
 | **CHFT v9 (SHA)** | Spectral Holographic Attention + Dual-Path gate vs multiscale | 26.67% | 51.99 | **53.1%** | 1220.6 MB | 317s (5 ep) | **Partial** |
 | **CHFT v10 (CSKA)** | Complex-Space Kernel Attention (ELU+1 kernel mapping) | 16.96% | 115.88 | 41.9% | 4005.1 MB | 700.3s (5 ep) | **Severe Failure** |
 | **CHFT v11 (SA + Beta)** | Spreading Activation Energy + Adaptive Beta scaling | 27.30% | 50.73 | 53.1% | 1221.0 MB | 763.6s (5 ep) | **Success** |
+| **CHFT v12 (MoE H-FFN)** | 8-Expert Sparse MoE on complex H-FFN block | 23.14% | 71.83 | 53.5% | 2229.4 MB | 460.0s (5 ep) | **Underfit / Slow** |
+| **CHFT v13 (Space Fold)** | Hyperdimensional FFN Projection to 3072 dims (Ctx=64) | 24.31% | 63.13 | 50.9% | 1798.1 MB | 396.0s (5 ep) | **Partial** |
+| **CHFT v13 (Ctx=128)** | Space-Folding with context scaled to 128 | 24.87% | 61.87 | 48.7% | 2773.5 MB | 536.0s (5 ep) | **Partial** |
+| **CHFT v14 (MH-CGRA)** | 8-head Subspace Attractor CGRA + mix (Ctx=128) | 27.07% | 50.49 | 56.1% | 2214.8 MB | 455.2s (5 ep) | **Success** |
+| **CHFT v14 (MH-CGRA Ctx=64)** | 8-head Subspace Attractor CGRA + mix (Ctx=64) | **27.96%** | **48.67** | **56.5%** | **1240.9 MB** | **319.4s (5 ep)** | **NEW CHAMPION** 🏆 |
 | **Transformer 1L** | Causal Self-Attention Baseline (3.1M parameters) | 37.10% | 15.35 | 33.1% | 2573.6 MB | 43.9m (10 ep) | **Ref Target** |
 
 ---
@@ -73,6 +78,13 @@ Below is a consolidated summary of all evaluated models, baseline standards, and
 * **Why it worked**: Filtered high-dimensional VSA cross-talk noise during summation, enabling the model to prioritise high-value context nodes. Scaling beta dynamically dynamically sharpens retrieval focus during confident matches while softening it for noisier contexts, preventing attraction to false local minima.
 * **Metric Boost**: Accuracy improved from **26.67%** (v9) to **27.30%** (+0.63pp), and perplexity dropped from **51.99** to **50.73** (-1.26), rescuing the network from the CSKA (v10) collapse.
 
+### 10. Multi-Head Subspace Attractor Routing (MH-CGRA / CHFT v14)
+* **Concept**: Partitioning the context bundle during Modern Hopfield Memory attractor routing into $H=8$ parallel subspace heads ($d=96$), updating each head with its own independent recurrent CGRA gates, and performing inter-head complex linear mixing between attractor hops.
+* **Why it worked**: Successfully distributed capacity into parallel subspaces, letting the model route distinct semantic features (e.g. subject, verb, context) in parallel without VSA crosstalk interference. It scaled remarkably well when context length doubled to $C=128$, maintaining the flat memory paradigm.
+* **Metric Boost**:
+  * At **Ctx=128**, achieved **27.07% Accuracy** and a lower perplexity of **50.49** (vs. 50.73 in v11 at Ctx=64), outperforming the space-folding projection models while using 550 MB less VRAM.
+  * At **Ctx=64**, achieved a record low perplexity of **48.67** (beating the champion v6's 48.69) and **27.96% Accuracy** (bridging the accuracy gap to just 0.21pp), while accelerating training time to **5.3 minutes** due to `torch.einsum` optimizations.
+
 ---
 
 ## ❌ 3. What Failed (Failures & Defeats)
@@ -105,6 +117,18 @@ Below is a consolidated summary of all evaluated models, baseline standards, and
   1. **Loss of Holographic Superposition Fidelity**: Projecting complex phasors into a real-valued kernel projection space and computing $Z$ destroyed the precise phase-relations necessary for FHRR binding.
   2. **VRAM and Compute Explosion**: Expanding to intermediate feature maps and accumulation tensors exploded Peak VRAM to **4.0 GB** (a 230% increase) and training time to **11.7 min** (a 120% increase) without any scaling advantages.
 * **Impact**: Accuracy plummeted to **16.96%** (down from 26.67%) and perplexity degraded to **115.88** (up from 51.99).
+
+### 6. Sparse Mixture of Experts (MoE) on H-FFN (v12)
+* **Concept**: Scaling the model's capacity by replacing the dense `HolographicMLP` with an 8-expert Sparse MoE block routing to Top-2 experts.
+* **Why it regressed/underperformed**:
+  1. **Data Scaling & Overfitting**: Expanding parameters from 13.8M to 80M created too much capacity for a small 1,000-story dataset (200k samples).
+  2. **Sparse Gradient Updates**: Since only 2 of 8 experts are updated per token, convergence is much slower, requiring significantly more epochs or data to balance expert routing and stabilize weights.
+* **Impact**: Perplexity degraded to **71.83** and Accuracy dropped to **23.14%** (under 5 epochs), with VRAM increasing to **2.2 GB**.
+
+### 7. Hyperdimensional Space-Folding Projections (v13)
+* **Concept**: Projecting the flat 768-dimensional phasor $\Psi$ into a wide 3072-dimensional space using trainable complex weights, applying dense H-FFN, and folding back to 768 dimensions.
+* **Why it regressed (compared to v11)**: While it significantly outperformed the MoE model by utilizing dense updates, standard random initialization of projection matrices degrades phasor coherence (FHRR phase angles). Without unitary or orthogonal constraints on the projection weights, mapping between spaces distorts the phase relationships, introducing noise that degrades Hopfield retrieval.
+* **Impact**: Perplexity improved to **63.13** (down from 71.83 in MoE) and Accuracy improved to **24.31%** (up from 23.14%), but did not reach the v11 baseline of **27.30% Acc**. VRAM was extremely efficient at **1.8 GB**.
 
 ---
 
