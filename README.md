@@ -1,3 +1,9 @@
+## This is a personal learning project created for educational purposes and to explore different code concepts with ai concepts. 
+
+* **Status:** Personal sandbox / Portfolio piece.
+* **License:** This project is open-source and available for public educational use under the MIT License.
+* **Purpose:** Academic research and technical skill development.
+
 # **CHFT: Complex Holographic Field Theory**
 
 An alternative neural network architecture utilizing complex-valued Vector Symbolic Architectures (VSA / Holographic Reduced Representations) and Continuous Associative Memory (Modern Hopfield Networks) to achieve constant ![][image1] memory context scaling.
